@@ -342,7 +342,7 @@ def validate_draft(proposal: dict, files: dict[str, str], pattern: dict, *, allo
                     report["tests"].append(r)
                     if not r["passed"]:
                         report["problems"].append(f"[{t['name']}] failed: {'; '.join(r['problems'])}")
-    else:  # skill: static checks only (behavioural evaluation needs a model run; see README)
+    else:  # skill: static checks only (behavioural evaluation needs a model run)
         skill = files.get("SKILL.md", "")
         m = re.match(r"^---\n(.*?)\n---\n", skill, re.S)
         if not m:

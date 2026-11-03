@@ -43,9 +43,26 @@ def now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
+def _umask() -> int:
+    old = os.umask(0)
+    os.umask(old)
+    return old
+
+
+UMASK = _umask()          # read once: changing the umask briefly is not thread-safe
+FILE_MODE = 0o666 & ~UMASK
+
+
 def store_dir() -> Path:
+    """The data folder. Private to you (0700): it holds your session transcripts."""
     d = Path(os.environ.get("LEARNING_HARNESS_STORE", REPO_ROOT / "store"))
-    d.mkdir(parents=True, exist_ok=True)
+    d.mkdir(parents=True, exist_ok=True, mode=0o700)
+    if os.name == "posix":
+        try:
+            if d.stat().st_mode & 0o077:
+                d.chmod(0o700)
+        except OSError:
+            pass
     return d
 
 
@@ -70,6 +87,7 @@ def write_json_atomic(path: Path, obj) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
     try:
+        os.chmod(tmp, FILE_MODE)  # mkstemp makes 0600; give the file normal (umask) permissions
         with os.fdopen(fd, "w", encoding="utf-8") as fh:
             json.dump(obj, fh, indent=2, ensure_ascii=False)
             fh.write("\n")

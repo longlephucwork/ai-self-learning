@@ -109,9 +109,24 @@ def on_windows_drive(path: str | None) -> bool:
     return bool(path) and Path(path).as_posix().startswith("/mnt/")
 
 
+def in_container() -> bool:
+    """Docker, Podman, containerd/Kubernetes or LXC."""
+    if Path("/.dockerenv").exists() or Path("/run/.containerenv").exists() or os.environ.get("container"):
+        return True
+    try:
+        cg = Path("/proc/1/cgroup").read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return False
+    return any(k in cg for k in ("docker", "containerd", "kubepods", "libpod", "/lxc/"))
+
+
 def os_name() -> str:
     w = wsl_version()
-    return f"Linux ({w})" if w else base_os()
+    if w:
+        return f"Linux ({w})"
+    if base_os() == "Linux" and in_container():
+        return "Linux (container)"
+    return base_os()
 
 
 # ---------------- 1. prerequisites ----------------
@@ -167,11 +182,14 @@ def sandbox_status(ui: UI, allow_flag: bool, dry: bool = False) -> None:
         else:
             warn(f"code sandbox {b} started, but the network probe said {r.stdout.strip() or r.stderr.strip()!r}")
         return
-    hint = {"Linux": "unprivileged user namespaces are off (Ubuntu 24.04+: see README > Installation)",
+    hint = {"Linux": "unprivileged user namespaces are off (Ubuntu 24.04+: see docs/testing-installs.md > Linux)",
             "Windows": "native Windows has no equivalent; WSL gives you the Linux sandbox",
             "macOS": "sandbox-exec is missing or blocked"}.get(base_os(), "")
     if wsl_version() == "WSL1":
         hint = "WSL1 has no network namespaces; convert the distro to WSL2 (wsl --set-version <distro> 2)"
+    elif base_os() == "Linux" and in_container():
+        hint = ("inside a container, Docker's default seccomp profile blocks `unshare`; start the container with "
+                "--security-opt seccomp=docker/seccomp-userns.json (see docs/testing-installs.md > Docker)")
     warn(f"no code sandbox on this system: {hint}")
     if sandbox.allow_unsandboxed():
         warn("you previously allowed running generated code and tools WITHOUT network isolation")

@@ -272,7 +272,7 @@ def cmd_approve(args):
     if e["type"] == "script":
         print(f"run it: python3 {reg.install_root() / e['path'] / e['entrypoint']} --help")
     if e["type"] == "tool":
-        print(f"Claude sees it as mcp__learned__{e['name']} once mcp_tools/server.py is registered (see README)")
+        print(f"Claude sees it as mcp__learned__{e['name']} once mcp_tools/server.py is registered (install.py does this)")
     print(f"revert: python3 registry/install.py uninstall {e['name']}")
     return 0
 

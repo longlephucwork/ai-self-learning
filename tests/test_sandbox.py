@@ -3,7 +3,7 @@
     python3 -m unittest tests.test_sandbox -v
 
 Linux uses `unshare -rn`, macOS uses `sandbox-exec`; on native Windows there is no sandbox and
-the isolation tests are skipped (the refusal test still runs). See README > Installation.
+the isolation tests are skipped (the refusal test still runs). See docs/testing-installs.md.
 """
 import json
 import os
@@ -62,7 +62,7 @@ class Sandbox(unittest.TestCase):
             self.assertEqual(b, "sandbox-exec", "sandbox-exec should exist on macOS (/usr/bin/sandbox-exec)")
         elif sys.platform.startswith("linux"):
             if b == "none":
-                self.skipTest("unshare -rn failed: unprivileged user namespaces are disabled (see README)")
+                self.skipTest("unshare -rn failed: unprivileged user namespaces are disabled (see docs/testing-installs.md > Linux)")
             self.assertEqual(b, "unshare")
         else:
             self.assertEqual(b, "none")

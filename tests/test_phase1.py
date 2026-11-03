@@ -164,6 +164,16 @@ class Phase1(unittest.TestCase):
         with self.assertRaises(FileNotFoundError):          # a wrong path given by hand is still an error
             log_session.ingest(str(Path(self.tmp.name) / "typo.jsonl"))
 
+    def test_file_permissions(self):
+        """Atomic writes get normal (umask) permissions, not mkstemp's 0600; the store dir is private."""
+        if os.name != "posix":
+            self.skipTest("POSIX permissions")
+        from harness_lib import store
+        p = Path(self.tmp.name) / "perm.json"
+        store.write_json_atomic(p, {"a": 1})
+        self.assertEqual(p.stat().st_mode & 0o777, store.FILE_MODE)
+        self.assertEqual(store.store_dir().stat().st_mode & 0o777, 0o700)
+
     def test_bad_session_id_rejected(self):
         from harness_lib import store
         for bad in ("../etc", "a/b", ".hidden", ""):

@@ -151,7 +151,8 @@ class Installer(unittest.TestCase):
     def test_wsl_detection(self):
         cases = {"5.15.153.1-microsoft-standard-WSL2\n": "WSL2", "6.6.36.6-microsoft-standard-WSL2+\n": "WSL2",
                  "4.4.0-19041-Microsoft\n": "WSL1", "6.8.0-45-generic\n": None, "": None}
-        with mock.patch.object(install, "base_os", return_value="Linux"):
+        with mock.patch.object(install, "base_os", return_value="Linux"), \
+                mock.patch.object(install, "in_container", return_value=False):
             for rel, want in cases.items():
                 with mock.patch.object(install, "_osrelease", return_value=rel):
                     self.assertEqual(install.wsl_version(), want, rel)
@@ -175,6 +176,32 @@ class Installer(unittest.TestCase):
         self.assertIn("WSL1, which has no network namespaces", out.getvalue())
         rc, out = self.run_main("--yes", "--skip-tests")                      # not WSL here: no WSL warnings
         self.assertNotIn("WSL", out.replace("WSL gives", ""))
+
+    def test_container_detection_and_hint(self):
+        with mock.patch.object(install, "base_os", return_value="Linux"), \
+                mock.patch.object(install, "wsl_version", return_value=None), \
+                mock.patch.object(install, "in_container", return_value=True):
+            self.assertEqual(install.os_name(), "Linux (container)")
+            from harness_lib import sandbox
+            out = io.StringIO()
+            with mock.patch.object(sandbox, "_backend", "none"), redirect_stdout(out):
+                install.sandbox_status(install.UI(True), False)
+        self.assertIn("seccomp=docker/seccomp-userns.json", out.getvalue())
+
+    def test_seccomp_profile_adds_only_unshare(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("msp", ROOT / "docker" / "make-seccomp-profile.py")
+        msp = importlib.util.module_from_spec(spec); spec.loader.exec_module(msp)
+        base = {"defaultAction": "SCMP_ACT_ERRNO", "syscalls": [{"names": ["read"], "action": "SCMP_ACT_ALLOW"}]}
+        out = msp.build(json.loads(json.dumps(base)))
+        out = msp.build(out)                                         # idempotent
+        self.assertEqual(out["syscalls"][0], base["syscalls"][0])
+        self.assertEqual([r["names"] for r in out["syscalls"]], [["read"], ["unshare"]])
+        shipped = json.loads((ROOT / "docker" / "seccomp-userns.json").read_text())
+        self.assertEqual(shipped["defaultAction"], "SCMP_ACT_ERRNO")
+        self.assertEqual(shipped["syscalls"][-1]["names"], ["unshare"])
+        with self.assertRaises(SystemExit):
+            msp.build({"defaultAction": "SCMP_ACT_ALLOW", "syscalls": []})
 
     def test_launchers_and_line_endings(self):
         self.assertTrue(os.access(ROOT / "install.sh", os.X_OK))

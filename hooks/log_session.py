@@ -49,6 +49,7 @@ def copy_transcript(src: str, session_id: str) -> str:
     # unique temp name: Stop and SessionEnd can ingest the same session concurrently
     fd, tmp = tempfile.mkstemp(dir=dst.parent, prefix=".transcript.", suffix=".tmp")
     os.close(fd)
+    os.chmod(tmp, store.FILE_MODE)
     with open(src, encoding="utf-8", errors="replace") as fin, gzip.open(tmp, "wt", encoding="utf-8") as fout:
         for line in fin:
             line = line.strip()
