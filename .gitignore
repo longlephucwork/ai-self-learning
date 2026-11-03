@@ -3,3 +3,6 @@ store/*
 !store/.gitkeep
 __pycache__/
 *.pyc
+
+# What the harness learns on your machine: its own local git repo, never pushed with the code
+learned/

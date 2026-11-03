@@ -8,8 +8,8 @@ it can also be run directly for listing and uninstalling:
   install.py uninstall <name> [--reason TEXT]
   install.py shims                 (re)create bin/<name> wrappers for installed scripts
 
-Install locations (relative to the install root = this repo unless
-$LEARNING_HARNESS_INSTALL_ROOT is set):
+Install locations, relative to the install root: learned/ in this repo (its own local git repo, which
+the code repo ignores, so learned items are never pushed), or $LEARNING_HARNESS_INSTALL_ROOT:
   script -> scripts/<name>/  plus a usage-logging wrapper bin/<name>   run with: bin/<name> ...
   skill  -> skills/<name>/ + symlink ~/.claude/skills/<name> -> it   (git stays the source of truth)
   tool   -> mcp_tools/tools/<name>/  (tool.json + any code), served by mcp_tools/server.py as mcp__learned__<name>
@@ -39,7 +39,21 @@ class InstallError(RuntimeError):
 
 
 def install_root() -> Path:
-    return Path(os.environ.get("LEARNING_HARNESS_INSTALL_ROOT", store.REPO_ROOT)).resolve()
+    return store.learned_dir().resolve()
+
+
+def ensure_learned_repo() -> None:
+    """Create learned/ as its own git repo on first use (only for the default location)."""
+    if "LEARNING_HARNESS_INSTALL_ROOT" in os.environ:
+        return
+    root = install_root()
+    if (root / ".git").exists():
+        return
+    root.mkdir(parents=True, exist_ok=True)
+    subprocess.run(["git", "init", "-q", str(root)], check=True, capture_output=True)
+    (root / "README.md").write_text("# learned\n\nWhat the learning harness learned on this machine. A local git repo: "
+                                    "every install, revision and rejection is a commit. Never pushed with the code.\n",
+                                    encoding="utf-8")
 
 
 def skills_link_dir() -> Path:
@@ -55,12 +69,12 @@ SHIM = """#!/usr/bin/env python3
 import json, os, subprocess, sys, time
 from datetime import datetime, timezone
 
-ROOT = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+ROOT = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))   # the learned/ folder
 ENTRY = os.path.join(ROOT, {entry!r})
 t0 = time.time()
 rc = subprocess.call([sys.executable, ENTRY] + sys.argv[1:])
 try:
-    store = os.environ.get("LEARNING_HARNESS_STORE") or os.path.join(ROOT, "store")
+    store = os.environ.get("LEARNING_HARNESS_STORE") or os.path.normpath(os.path.join(ROOT, {store_rel!r}))
     os.makedirs(os.path.join(store, "usage"), exist_ok=True)
     rec = {{"name": {name!r}, "version": {version}, "at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
            "exit": rc, "duration_ms": int((time.time() - t0) * 1000),
@@ -94,7 +108,8 @@ def write_shim(entry: dict) -> Path:
     """bin/<name> (Python, used directly on Linux/macOS) and bin/<name>.cmd (Windows)."""
     p = shim_path(entry["name"])
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(SHIM.format(name=entry["name"], version=entry["version"],
+    store_rel = os.path.relpath(store.store_dir().resolve(), install_root()).replace(os.sep, "/")
+    p.write_text(SHIM.format(name=entry["name"], version=entry["version"], store_rel=store_rel,
                              entry=f"{entry['path']}/{entry['entrypoint']}"), encoding="utf-8")
     os.chmod(p, 0o755)
     with open(p.with_name(p.name + ".cmd"), "w", encoding="utf-8", newline="\r\n") as fh:
@@ -135,11 +150,20 @@ def file_hashes(files: dict[str, str]) -> dict[str, str]:
 # ---------------- git ----------------
 
 def _git(*args, check=True) -> subprocess.CompletedProcess:
-    return subprocess.run(["git", "-C", str(install_root()), *args], capture_output=True, text=True, check=check)
+    return subprocess.run(["git", "-C", str(install_root()), *_identity(), *args], capture_output=True, text=True,
+                          check=check)
+
+
+def _identity() -> list[str]:
+    """Commit as you if git knows who you are; otherwise as `learning-harness`, instead of failing."""
+    have = subprocess.run(["git", "-C", str(install_root()), "config", "user.email"], capture_output=True,
+                          text=True).stdout.strip() or os.environ.get("GIT_COMMITTER_EMAIL")
+    return [] if have else ["-c", "user.name=learning-harness", "-c", "user.email=learning-harness@localhost"]
 
 
 def git_available() -> bool:
     try:
+        ensure_learned_repo()
         return _git("rev-parse", "--is-inside-work-tree", check=False).stdout.strip() == "true"
     except FileNotFoundError:
         return False

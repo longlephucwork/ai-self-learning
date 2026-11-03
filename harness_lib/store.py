@@ -53,6 +53,14 @@ UMASK = _umask()          # read once: changing the umask briefly is not thread-
 FILE_MODE = 0o666 & ~UMASK
 
 
+def learned_dir() -> Path:
+    """Everything the harness learns: its own local git repo, ignored by the code repo (never pushed).
+
+    Holds registry.json, patterns/, generated/ (drafts), scripts/, skills/, mcp_tools/tools/ and bin/.
+    Override with LEARNING_HARNESS_INSTALL_ROOT."""
+    return Path(os.environ.get("LEARNING_HARNESS_INSTALL_ROOT", REPO_ROOT / "learned"))
+
+
 def store_dir() -> Path:
     """The data folder. Private to you (0700): it holds your session transcripts."""
     d = Path(os.environ.get("LEARNING_HARNESS_STORE", REPO_ROOT / "store"))
@@ -278,7 +286,7 @@ def save_summary(sid: str, rec: dict) -> None:
 # ---------- patterns (Phase 2+; git-tracked, outside store/) ----------
 
 def patterns_dir() -> Path:
-    d = Path(os.environ.get("LEARNING_HARNESS_PATTERNS", REPO_ROOT / "patterns"))
+    d = Path(os.environ.get("LEARNING_HARNESS_PATTERNS", learned_dir() / "patterns"))
     d.mkdir(parents=True, exist_ok=True)
     return d
 

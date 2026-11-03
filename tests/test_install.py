@@ -61,7 +61,7 @@ class Installer(unittest.TestCase):
             install.edit_rc(rc, install.rc_block(rc))
         text = rc.read_text()
         self.assertEqual(text.count(install.MARK_BEGIN), 1)
-        self.assertIn(f'export PATH="{(ROOT / "bin").as_posix()}:$PATH"', text)
+        self.assertIn(f'export PATH="{(ROOT / "learned" / "bin").as_posix()}:$PATH"', text)
         self.assertIn("alias ll='ls -l'", text)
         install.edit_rc(rc, None)
         self.assertEqual(rc.read_text(), "alias ll='ls -l'\n")
@@ -180,6 +180,36 @@ class Installer(unittest.TestCase):
         self.assertEqual(env["USERPROFILE"], r"C:\tmp\box")
         self.assertNotIn("API_TOKEN", env)
 
+    def test_learned_items_live_in_a_local_repo_that_is_never_pushed(self):
+        """learned/ is its own git repo (created on first use) and the code repo ignores it."""
+        import subprocess, tempfile
+        from harness_lib import store
+        self.assertEqual(store.learned_dir(), ROOT / "learned")
+        ignored = subprocess.run(["git", "-C", str(ROOT), "check-ignore", "-q", "learned/registry.json"])
+        self.assertEqual(ignored.returncode, 0, "learned/ must be git-ignored by the code repo")
+        tracked = subprocess.run(["git", "-C", str(ROOT), "ls-files", "patterns", "generated", "registry.json",
+                                  "scripts", "skills", "bin", "learned"], capture_output=True, text=True).stdout
+        self.assertEqual(tracked, "", "the code repo must not ship learned items")
+        with tempfile.TemporaryDirectory() as d, mock.patch.object(store, "REPO_ROOT", Path(d)):
+            os.environ.pop("LEARNING_HARNESS_INSTALL_ROOT", None)
+            from registry import install as reg
+            self.assertTrue(reg.git_available())                     # created on first use
+            self.assertTrue((Path(d) / "learned" / ".git").is_dir())
+            self.assertTrue((Path(d) / "learned" / "README.md").exists())
+
+    def test_wrapper_finds_the_store_relative_to_itself(self):
+        import tempfile
+        from harness_lib import store
+        from registry import install as reg
+        with tempfile.TemporaryDirectory() as d:
+            os.environ["LEARNING_HARNESS_INSTALL_ROOT"] = str(Path(d) / "learned")
+            os.environ["LEARNING_HARNESS_STORE"] = str(Path(d) / "store")
+            p = reg.write_shim({"name": "x", "version": 1, "path": "scripts/x", "entrypoint": "x.py"})
+            text = p.read_text()
+            self.assertIn("'../store'", text)                       # relative: survives moving the repo
+            data = p.with_name("x.cmd").read_bytes()
+            self.assertEqual(data.count(b"\n"), data.count(b"\r\n"))   # Windows wrapper: CRLF
+
     def test_wsl_detection(self):
         cases = {"5.15.153.1-microsoft-standard-WSL2\n": "WSL2", "6.6.36.6-microsoft-standard-WSL2+\n": "WSL2",
                  "4.4.0-19041-Microsoft\n": "WSL1", "6.8.0-45-generic\n": None, "": None}
@@ -238,7 +268,7 @@ class Installer(unittest.TestCase):
     def test_launchers_and_line_endings(self):
         self.assertTrue(os.access(ROOT / "install.sh", os.X_OK))
         self.assertNotIn(b"\r\n", (ROOT / "install.sh").read_bytes())
-        for f in ("install.bat", "install.ps1", "bin/csv-to-json.cmd"):
+        for f in ("install.bat", "install.ps1"):
             data = (ROOT / f).read_bytes()
             self.assertEqual(data.count(b"\n"), data.count(b"\r\n"), f)   # every newline is CRLF
         self.assertIn('install.ps1" %*', (ROOT / "install.bat").read_text())

@@ -56,6 +56,6 @@ python3 install.py --rollback    # go back to the previous version
 - Stop the update check: set `"check": false` under `"update"` in `store/config.json`.
 - Status: `python3 install.py --check`.
 
-Your sessions stay on your machine, in `store/`, which only you can read and which is never committed. Each learned item is a git commit, so you can always revert it.
+Your sessions stay on your machine, in `store/`, which only you can read. What the harness learns goes in `learned/`, its own local git repo: each learned item is a commit you can revert, and none of it is ever pushed with the code.
 
 How it works in detail: [docs/how-it-works.md](docs/how-it-works.md).

@@ -2,6 +2,16 @@
 
 What each phase does, the files it writes, and the rules enforced in code. For installation, see the [README](../README.md).
 
+## Where things live
+
+| Folder | What | In the code repo? |
+|---|---|---|
+| `store/` | your sessions, ratings, summaries, usage, spend, settings (`config.json`) | no: git-ignored, readable only by you |
+| `learned/` | everything the harness learns: `patterns/`, drafts in `generated/`, installed `scripts/`, `skills/`, `mcp_tools/tools/`, the `bin/` wrappers and `registry.json` | no: git-ignored. It's **its own local git repo**, created on first use, so every install, revision, rejection and uninstall is still a commit you can revert |
+| everything else | the harness's code | yes: what releases and updates contain |
+
+So pushing or publishing a release never includes anything learned on your machine, and updates only touch code, so they can't conflict with what you've learned. `LEARNING_HARNESS_INSTALL_ROOT` moves `learned/` elsewhere.
+
 ## Phase 1: Capture
 
 | Piece | What it does |
@@ -60,7 +70,7 @@ python3 detect/find_patterns.py cluster --method family --success accepted   # n
 | Piece | What it does |
 |---|---|
 | `detect/summarize.py` | Builds a compact digest from `session.json` (max 24k chars) and asks `claude -p` for `{intent, task_family, inputs, outputs, steps, deterministic, tools_used, injection_suspected}`. Writes `store/sessions/<id>/summary.json`. |
-| `detect/cluster.py` | Groups summaries into `patterns/<key>.json` (git-tracked). `--method claude` (default) merges near-duplicates and reuses existing keys; `--method family` groups by slug with no LLM. |
+| `detect/cluster.py` | Groups summaries into `learned/patterns/<key>.json`. `--method claude` (default) merges near-duplicates and reuses existing keys; `--method family` groups by slug with no LLM. |
 | `harness_lib/claude_cli.py` | The single locked-down way the harness calls Claude. |
 | `harness_lib/schema_check.py` | Local re-validation of every model response before anything is written. |
 
@@ -83,7 +93,7 @@ python3 generate/propose.py list                     # drafts and their status
 python3 validate/replay.py csv-to-json               # re-run validation after hand-editing a draft
 ```
 
-A draft lives in `generated/<name>/` (git-tracked) and is **not installed**:
+A draft lives in `learned/generated/<name>/` and is **not installed**:
 ```
 proposal.json    type, spec, tests (with provenance), scan flags, evidence session ids, attempts, cost
 files/...        the artifact's files
@@ -107,7 +117,7 @@ If validation passes, the pattern's status becomes `proposed` and it waits for P
 2. **Bundled scripts are tested** in the sandbox, like scripts. Each test names its `script`. Their expected outputs are usually intermediate data that never appears in the logs, so these tests are normally `synthetic`. They must pass, but they aren't evidence for the skill.
 3. **Judged checks** (`validate/judge.py`) are the evidence. For each successful session (up to 5), a model with no tools sees the skill, the session's request, steps and accepted result, and your rating note. It decides whether following the skill would produce what you accepted, including the correction in an `edited` note. Every check must pass, for at least `min(3, successful sessions)`. This is a model's judgment, not execution, and `review` shows each verdict with the rules it checked. It runs only after everything cheaper has passed, uses `claude-sonnet-5-5` by default (`$LEARNING_HARNESS_JUDGE_MODEL`), and results are cached by content, so re-validating or approving an unchanged draft costs nothing.
 
-**Note:** tests are built from real session data, so `generated/` contains (redacted) snippets of your sessions, and that folder is committed to git.
+**Note:** tests are built from real session data, so drafts contain (redacted) snippets of your sessions. They stay in your local `learned/` repo and are never pushed.
 
 ## Phase 4: Review + register
 
@@ -115,7 +125,7 @@ If validation passes, the pattern's status becomes `proposed` and it waits for P
 python3 review/cli.py proposals                  # drafts: status, times seen, tests, blocking flags
 python3 review/cli.py review csv-to-json         # evidence, rating notes, spec, full code, scan, tests
 python3 review/cli.py diff csv-to-json           # vs the installed version (all new on first install)
-python3 review/cli.py revalidate csv-to-json     # after hand-editing generated/<name>/files or the tests
+python3 review/cli.py revalidate csv-to-json     # after hand-editing learned/generated/<name>/files or the tests
 python3 review/cli.py approve csv-to-json --note "..."   # asks you to type the name to confirm
 python3 review/cli.py reject csv-to-json --reason "..."
 python3 registry/install.py list
@@ -131,11 +141,11 @@ python3 registry/install.py uninstall csv-to-json --reason "..."
 **Where things go (`registry/install.py`):**
 | Type | Installed to | Notes |
 |---|---|---|
-| script | `scripts/<name>/`, plus the usage wrapper `bin/<name>` | Run `bin/<name> ...` (or add `bin/` to `PATH`) so usage is tracked |
-| skill | `skills/<name>/`, plus a symlink `~/.claude/skills/<name>` pointing to it | Git stays the source of truth; reverting the commit reverts the skill |
-| tool | `mcp_tools/tools/<name>/` | Served by `mcp_tools/server.py`; Claude sees it as `mcp__learned__<name>` |
+| script | `learned/scripts/<name>/`, plus the usage wrapper `learned/bin/<name>` | Run `<name> ...` (the installer puts `learned/bin` on your PATH) so usage is tracked |
+| skill | `learned/skills/<name>/`, plus a symlink `~/.claude/skills/<name>` pointing to it | The `learned/` repo stays the source of truth; reverting the commit reverts the skill |
+| tool | `learned/mcp_tools/tools/<name>/` | Served by `mcp_tools/server.py`; Claude sees it as `mcp__learned__<name>` |
 
-`registry.json` records each installed artifact: version, pattern, evidence sessions, file hashes, test results, approval time and note, and a usage counter for Phase 5. It also keeps a `history` of installs and uninstalls.
+`learned/registry.json` records each installed artifact: version, pattern, evidence sessions, file hashes, test results, and approval time and note. (Usage is tracked separately, in `store/usage/`.) It also keeps a `history` of installs and uninstalls.
 
 **Git:** install, reject and uninstall each make one commit (`learned: install script csv-to-json v1`, with the evidence and test counts in the body). The commit covers **only** the paths that action touched, so unrelated work in your tree is never swept in. To undo a learned habit, run `registry/install.py uninstall`, or `git revert` the commit.
 
@@ -146,7 +156,7 @@ python3 registry/install.py uninstall csv-to-json --reason "..."
 ```bash
 python3 refine/refine.py usage                    # per installed item: uses, failures, sessions, missed
 python3 refine/refine.py report                   # keep / revise / retire / missed / reconsider
-python3 refine/refine.py revise csv-to-json       # drafts generated/csv-to-json-v2 from the failures
+python3 refine/refine.py revise csv-to-json       # drafts learned/generated/csv-to-json-v2 from the failures
 python3 review/cli.py diff csv-to-json-v2         # then approve or reject as usual
 python3 refine/refine.py record csv-to-json fail --note "..."   # a use the harness couldn't see
 python3 refine/refine.py cycle --generate 1       # detect -> draft new candidates -> report
@@ -156,7 +166,7 @@ Nothing in Phase 5 installs, uninstalls or edits an artifact. It writes reports 
 **Where usage comes from:**
 | Source | What it gives |
 |---|---|
-| `bin/<name>` wrapper -> `store/usage/<name>.jsonl` | One line per run: time, exit code, duration, version, `terminal` or `claude`, and the Claude session id (`CLAUDE_CODE_SESSION_ID`). Never arguments, contents or output. Harness code, not learned code. |
+| `learned/bin/<name>` wrapper -> `store/usage/<name>.jsonl` | One line per run: time, exit code, duration, version, `terminal` or `claude`, and the Claude session id (`CLAUDE_CODE_SESSION_ID`). Never arguments, contents or output. Harness code, not learned code. |
 | Session transcripts | Bash steps calling `bin/<name>` or `scripts/<name>/`, and `Skill` calls for installed skills, with the step's error flag. Not double-counted when the wrapper already logged that session. |
 | Ratings | Any use inside a session rated `redone` counts as a failure; the rating note is passed on as evidence. |
 | `refine.py record` | Manual entries for uses outside both. |
@@ -186,7 +196,7 @@ claude mcp add --scope user learned -- python3 /path/to/claude-learning-harness/
 That makes it available in every project. Sessions inside this repo also pick it up from `.mcp.json` (project scope); interactive sessions ask you to approve project servers the first time. Check with `claude mcp list`.
 
 **What it does:**
-- `tools/list` returns the `tool` entries in `registry.json`, with their schema and a description that says how many past sessions they were learned from. The registry is re-read on every request, and a `notifications/tools/list_changed` message is sent when it changes, so approving or uninstalling a tool reaches running sessions.
+- `tools/list` returns the `tool` entries in `learned/registry.json`, with their schema and a description that says how many past sessions they were learned from. The registry is re-read on every request, and a `notifications/tools/list_changed` message is sent when it changes, so approving or uninstalling a tool reaches running sessions.
 - `tools/call`:
   1. checks the arguments against the schema (unknown keys and values starting with `-` are rejected)
   2. runs the tool in the project directory (`$CLAUDE_PROJECT_DIR`) without network (see the sandbox table in [testing-installs.md](testing-installs.md)), with a scrubbed environment, resource limits and a 60s timeout
@@ -208,7 +218,7 @@ That makes it available in every project. Sessions inside this repo also pick it
 - A script can't be uninstalled while a tool wraps it (`--force` overrides).
 
 ```bash
-python3 refine/refine.py expose csv-to-json        # drafts generated/csv_to_json/
+python3 refine/refine.py expose csv-to-json        # drafts learned/generated/csv_to_json/
 python3 review/cli.py review csv_to_json
 python3 review/cli.py approve csv_to_json
 ```

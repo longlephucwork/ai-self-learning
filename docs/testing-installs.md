@@ -54,10 +54,9 @@ python3 install.py --check
 cd ~ && claude mcp get learned
 ```
 
-**6. PATH and the script wrapper.** Expect `.../claude-learning-harness/bin/csv-to-json`, the `usage: csv_to_json.py ...` line, and your Python's path:
+**6. PATH.** Expect a line ending in `claude-learning-harness/learned/bin` (where wrappers for scripts you approve will go), and your Python's path:
 ```bash
-command -v csv-to-json
-csv-to-json --help
+echo "$PATH" | tr ':' '\n' | grep learned/bin
 echo "$LEARNING_HARNESS_PYTHON"
 ```
 
@@ -146,10 +145,9 @@ python install.py --check
 claude mcp get learned
 ```
 
-**5. PATH and the script wrapper.** Expect `...\claude-learning-harness\bin\csv-to-json.cmd`, the `usage: csv_to_json.py ...` line, and the path of `python.exe`:
+**5. PATH.** Expect a line ending in `claude-learning-harness\learned\bin` (where wrappers for scripts you approve will go), and the path of `python.exe`:
 ```powershell
-where.exe csv-to-json
-csv-to-json --help
+$env:Path -split ';' | Select-String 'learned\\bin'
 $env:LEARNING_HARNESS_PYTHON
 ```
 
@@ -213,7 +211,7 @@ It clones to `~/claude-learning-harness`. Don't use a clone under `/mnt/c/...`: 
 - `[ok] self-test: OK`
 - `[ok]` for the hooks, the MCP server and the PATH
 
-**5. Then steps 4–9 of [Linux](#linux).** Run them inside WSL, from `~/claude-learning-harness`: `install.py --check`, `claude mcp get learned` (from `~`), the PATH and wrapper, session logging, the tests (all run, nothing skipped), and uninstall.
+**5. Then steps 4–9 of [Linux](#linux).** Run them inside WSL, from `~/claude-learning-harness`: `install.py --check`, `claude mcp get learned` (from `~`), the PATH, session logging, the tests (all run, nothing skipped), and uninstall.
 
 **6. Which Claude Code sees it.** The hooks and the MCP server are installed for the Claude Code that runs **inside WSL**:
 - in the WSL terminal: `claude`

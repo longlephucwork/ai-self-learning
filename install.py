@@ -287,8 +287,13 @@ def rc_file() -> Path:
     return home / ".profile"
 
 
+def bin_dir_path() -> Path:
+    """Wrappers for installed scripts live in learned/bin (learned/ is the local, never-pushed repo)."""
+    return REPO / "learned" / "bin"
+
+
 def rc_block(rc: Path) -> str:
-    bin_dir, py = (REPO / "bin").as_posix(), python_exe()
+    bin_dir, py = bin_dir_path().as_posix(), python_exe()
     if rc.name == "config.fish":
         body = f'set -gx PATH "{bin_dir}" $PATH\nset -gx LEARNING_HARNESS_PYTHON "{py}"'
     else:
@@ -338,7 +343,8 @@ def _win_env(set_vars: dict[str, str | None], path_add: str | None, path_remove:
 
 
 def setup_path(uninstall=False) -> bool:
-    bin_dir = str(REPO / "bin")
+    bin_dir = str(bin_dir_path())
+    bin_dir_path().mkdir(parents=True, exist_ok=True)
     if IS_WIN:
         _win_env({"LEARNING_HARNESS_PYTHON": None if uninstall else str(Path(sys.executable).resolve())},
                  None if uninstall else bin_dir, bin_dir if uninstall else None)
@@ -352,7 +358,7 @@ def setup_path(uninstall=False) -> bool:
 
 def path_installed() -> bool:
     if IS_WIN:
-        return str(REPO / "bin").lower() in os.environ.get("PATH", "").lower()
+        return str(bin_dir_path()).lower() in os.environ.get("PATH", "").lower()
     rc = rc_file()
     return rc.exists() and MARK_BEGIN in rc.read_text(encoding="utf-8")
 
