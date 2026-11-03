@@ -67,9 +67,9 @@ python3 review/cli.py list -n 3
 ```
 If it doesn't, check the hook command in `~/.claude/settings.json` (the quoted Python path followed by the quoted `hooks/log_session.py` path) and `store/hook_errors.log`.
 
-**8. Tests.** Every test runs on Linux, nothing is skipped, and they take about 25 seconds:
+**8. Tests.** Every test runs on Linux; the suite should end with `OK` and nothing skipped:
 ```bash
-python3 -m unittest tests.test_sandbox -v      # 8 tests, starts with: platform=linux backend=unshare
+python3 -m unittest tests.test_sandbox -v      # starts with: platform=linux backend=unshare
 python3 -m unittest discover -s tests -t .     # the full suite
 ```
 
@@ -102,7 +102,7 @@ Expected: the first prints `open`; the second fails with `PermissionError` / `Op
 python3 install.py --check
 ```
 
-**4. The sandbox test suite passes.** All 8 tests should pass, including `platform=darwin backend=sandbox-exec`:
+**4. The sandbox test suite passes.** Every test should pass, and the first line should read `platform=darwin backend=sandbox-exec`:
 ```bash
 python3 -m unittest tests.test_sandbox -v
 ```
@@ -257,7 +257,7 @@ Expected:
 - `[ok] self-test: OK`
 - the suite ends with `OK`, with nothing skipped
 
-Without the `--security-opt` flag, you get `[warn] no code sandbox ... Docker's default seccomp profile blocks unshare` and the suite reports `OK (skipped=40)`. The skipped tests are the ones that run generated code. Add `--user 1000:1000 -e HOME=/tmp/h` (and create `/tmp/h`) to repeat the test as a normal user, as many dev containers run.
+Without the `--security-opt` flag, you get `[warn] no code sandbox ... Docker's default seccomp profile blocks unshare` and the suite still ends with `OK`, but reports the tests that run generated code as skipped. Add `--user 1000:1000 -e HOME=/tmp/h` (and create `/tmp/h`) to repeat the test as a normal user, as many dev containers run.
 
 **3. Using it day to day in a container** (for example a dev container):
 - Claude Code must be installed **inside** the container, and logged in there, since it reads its config from the container's home.
