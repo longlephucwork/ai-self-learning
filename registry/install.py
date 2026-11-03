@@ -12,7 +12,7 @@ Install locations (relative to the install root = this repo unless
 $LEARNING_HARNESS_INSTALL_ROOT is set):
   script -> scripts/<name>/  plus a usage-logging wrapper bin/<name>   run with: bin/<name> ...
   skill  -> skills/<name>/ + symlink ~/.claude/skills/<name> -> it   (git stays the source of truth)
-  tool   -> not yet: needs the MCP tool server (mcp_tools/server.py), which isn't built yet
+  tool   -> mcp_tools/tools/<name>/  (tool.json + any code), served by mcp_tools/server.py as mcp__learned__<name>
 registry.json records what is installed, which version, from which pattern and evidence.
 """
 from __future__ import annotations
@@ -157,8 +157,9 @@ def target_dir(kind: str, name: str) -> Path:
         return install_root() / "scripts" / name
     if kind == "skill":
         return install_root() / "skills" / name
-    raise InstallError(f"installing a {kind!r} is not supported yet "
-                       f"(tools need the MCP tool server, mcp_tools/server.py, which isn't built yet)")
+    if kind == "tool":
+        return install_root() / "mcp_tools" / "tools" / name
+    raise InstallError(f"unknown artifact type {kind!r}")
 
 
 def install(proposal: dict, files: dict[str, str], *, draft_dir: Path, note: str | None,
@@ -173,6 +174,12 @@ def install(proposal: dict, files: dict[str, str], *, draft_dir: Path, note: str
     prev = reg["installed"].get(name)
     if prev and prev["pattern_key"] != proposal["pattern_key"]:
         raise InstallError(f"{name!r} is already installed from another pattern ({prev['pattern_key']})")
+    if prev and prev["type"] != kind:
+        raise InstallError(f"{name!r} is already installed as a {prev['type']}")
+    if proposal.get("wraps"):
+        wrapped = reg["installed"].get(proposal["wraps"]["script"])
+        if not wrapped or wrapped["type"] != "script":
+            raise InstallError(f"tool wraps {proposal['wraps']['script']!r}, which is not an installed script")
     link = None
     if kind == "skill":
         link = skills_link_dir() / name
@@ -213,6 +220,8 @@ def install(proposal: dict, files: dict[str, str], *, draft_dir: Path, note: str
         "approved_at": store.now(), "approval_note": note,
         "draft": _rel(draft_dir),
     }
+    if proposal.get("wraps"):
+        entry["wraps"] = proposal["wraps"]["script"]
     if kind == "script":
         entry["shim"] = write_shim(entry).relative_to(install_root()).as_posix()
     reg["installed"][name] = entry
@@ -223,7 +232,7 @@ def install(proposal: dict, files: dict[str, str], *, draft_dir: Path, note: str
     if pattern:
         pattern["status"] = "installed"
         pattern["installed"] = {"name": name, "version": entry["version"], "at": entry["approved_at"]}
-        pattern.pop("pending_revision", None)
+        pattern.pop("pending_revision" if kind != "tool" or not proposal.get("wraps") else "pending_exposure", None)
         store.save_pattern(pattern)
     meta = store.read_json(draft_dir / "proposal.json")
     meta["status"] = "installed"
@@ -262,11 +271,14 @@ def reject(proposal: dict, *, draft_dir: Path, reason: str, use_git: bool = True
     return None
 
 
-def uninstall(name: str, *, reason: str | None = None, use_git: bool = True) -> str | None:
+def uninstall(name: str, *, reason: str | None = None, use_git: bool = True, force: bool = False) -> str | None:
     reg = load_registry()
-    entry = reg["installed"].pop(name, None)
-    if not entry:
+    if name not in reg["installed"]:
         raise InstallError(f"{name!r} is not installed")
+    users = [e["name"] for e in reg["installed"].values() if e.get("wraps") == name]
+    if users and not force:
+        raise InstallError(f"{name!r} is used by installed tool(s) {users}; uninstall those first (or pass --force)")
+    entry = reg["installed"].pop(name)
     dest = install_root() / entry["path"]
     if entry.get("symlink"):
         link = Path(entry["symlink"])
@@ -295,7 +307,7 @@ def main(argv=None):
     sub = ap.add_subparsers(dest="cmd", required=True)
     sub.add_parser("list")
     p = sub.add_parser("uninstall"); p.add_argument("name"); p.add_argument("--reason")
-    p.add_argument("--no-git", action="store_true")
+    p.add_argument("--no-git", action="store_true"); p.add_argument("--force", action="store_true")
     p = sub.add_parser("shims"); p.add_argument("--no-git", action="store_true")
     a = ap.parse_args(argv)
     if a.cmd == "shims":
@@ -321,7 +333,7 @@ def main(argv=None):
                   f"(pattern {e['pattern_key']}, approved {e['approved_at'][:10]})")
         return 0
     try:
-        c = uninstall(a.name, reason=a.reason, use_git=not a.no_git)
+        c = uninstall(a.name, reason=a.reason, use_git=not a.no_git, force=a.force)
     except InstallError as e:
         sys.exit(f"error: {e}")
     print(f"uninstalled {a.name}" + (f" (commit {c})" if c else ""))

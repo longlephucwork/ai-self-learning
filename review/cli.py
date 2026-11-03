@@ -252,6 +252,9 @@ def cmd_approve(args):
           f"files: {', '.join(sorted(files))}")
     if proposal["type"] == "skill":
         print(f"  and symlink {reg.skills_link_dir() / proposal['name']} -> it (Claude Code will load this skill)")
+    if proposal["type"] == "tool":
+        how = f"wraps the installed script {proposal['wraps']['script']}" if proposal.get("wraps") else "new code"
+        print(f"  served by the MCP server as mcp__learned__{proposal['name']} ({how})")
     if not args.yes:
         if not sys.stdin.isatty():
             print("not approved: approval needs an interactive terminal (or an explicit --yes)", file=sys.stderr)
@@ -268,6 +271,8 @@ def cmd_approve(args):
           (f" (commit {e['commit']})" if e.get("commit") else ""))
     if e["type"] == "script":
         print(f"run it: python3 {reg.install_root() / e['path'] / e['entrypoint']} --help")
+    if e["type"] == "tool":
+        print(f"Claude sees it as mcp__learned__{e['name']} once mcp_tools/server.py is registered (see README)")
     print(f"revert: python3 registry/install.py uninstall {e['name']}")
     return 0
 

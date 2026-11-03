@@ -32,6 +32,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from harness_lib import store  # noqa: E402
+from harness_lib import tools as rt  # noqa: E402
 
 TIMEOUT_S = 20
 MAX_OUTPUT = 4000
@@ -217,7 +218,85 @@ def check_provenance(test: dict, members: set[str], cache: dict) -> list[str]:
 
 # ---------------- whole-draft validation ----------------
 
+def tool_schema(proposal: dict, files: dict[str, str]):
+    """The input schema of a tool draft, from tool.json on disk or the raw proposal."""
+    try:
+        if "tool.json" in files:
+            return json.loads(files["tool.json"])["input_schema"]
+        return json.loads(proposal.get("tool_input_schema_json") or "null")
+    except (json.JSONDecodeError, KeyError):
+        return None
+
+
+def validate_exposure(proposal: dict, files: dict[str, str], *, allow_no_netns=False) -> dict:
+    """A tool that wraps an installed script: the argv template must reproduce every validated test of the
+    script exactly (so the script's own tests prove the tool's behaviour), and those tests are re-run."""
+    from registry import install as reg  # local import: registry imports store only
+    netns = netns_available()
+    rep = {"validated_at": store.now(), "network_isolated": netns, "tests": [], "provenance": [],
+           "coverage": {}, "passed": False, "problems": []}
+    P = rep["problems"]
+    try:
+        spec = json.loads(files["tool.json"])
+        schema, template, script = spec["input_schema"], spec["wraps"]["argv"], spec["wraps"]["script"]
+    except (KeyError, json.JSONDecodeError) as e:
+        P.append(f"tool.json is missing or malformed: {e}")
+        return rep
+    if not rt.TOOL_NAME_RE.match(proposal["name"]):
+        P.append(f"tool name {proposal['name']!r} must match {rt.TOOL_NAME_RE.pattern}")
+    if not isinstance(schema, dict) or schema.get("type") != "object":
+        P.append("input_schema must be a JSON Schema object with type=object")
+        return rep
+    P += rt.check_template(template, schema)
+    entry = reg.load_registry()["installed"].get(script)
+    if not entry or entry["type"] != "script":
+        P.append(f"wrapped script {script!r} is not installed")
+        return rep
+    base = reg.install_root() / entry["path"]
+    script_files = {q.relative_to(base).as_posix(): q.read_text(encoding="utf-8")
+                    for q in sorted(base.rglob("*")) if q.is_file()}
+    script_tests = (store.read_json(reg.resolve(entry["draft"]) / "proposal.json") or {}).get("tests", [])
+    if not script_tests:
+        P.append(f"no validated tests found for {script!r}; can't prove the mapping")
+    examples = {t.get("wraps_test"): t for t in proposal.get("tests", [])}
+    mapped = 0
+    for st in script_tests:
+        ex = examples.get(st["name"])
+        probs = []
+        if ex is None:
+            probs.append("no example arguments given for this test")
+        else:
+            args = ex.get("arguments")
+            probs += rt.check_arguments(args, schema, mode="argv")
+            if not probs and not P:
+                try:
+                    argv = rt.render_argv(template, args)
+                except rt.ToolError as e:
+                    argv, _ = None, probs.append(str(e))
+                if argv is not None and argv != st.get("args", []):
+                    probs.append(f"template renders {argv}, but the script test runs {st.get('args')}")
+        rep["provenance"].append({"name": st["name"], "provenance": "wraps", "problems": probs})
+        P += [f"[{st['name']}] {p}" for p in probs]
+        if not probs and not P:
+            mapped += 1
+    rep["coverage"] = {"successful_sessions": len(script_tests), "covered": mapped, "required": len(script_tests)}
+    if not P:
+        if not netns and not allow_no_netns:
+            P.append("network isolation (unshare -rn) unavailable; refusing to run code")
+        else:
+            for st in script_tests:
+                r = run_test(script_files, entry["entrypoint"], st, netns=netns)
+                rep["tests"].append(r)
+                if not r["passed"]:
+                    P.append(f"[{st['name']}] script test failed: {'; '.join(r['problems'])}")
+    rep["passed"] = not P
+    rep["fingerprint"] = fingerprint(files, proposal.get("tests", []))
+    return rep
+
+
 def validate_draft(proposal: dict, files: dict[str, str], pattern: dict, *, allow_no_netns=False) -> dict:
+    if proposal.get("wraps"):
+        return validate_exposure(proposal, files, allow_no_netns=allow_no_netns)
     netns = netns_available()
     report = {"validated_at": store.now(), "network_isolated": netns, "tests": [], "provenance": [],
               "coverage": {}, "passed": False, "problems": []}
@@ -245,6 +324,21 @@ def validate_draft(proposal: dict, files: dict[str, str], pattern: dict, *, allo
     if len(covered) < need:
         report["problems"].append(f"tests cover {len(covered)} successful session(s); need {need}")
 
+    if proposal["type"] == "tool":
+        schema = tool_schema(proposal, files)
+        if not isinstance(schema, dict) or schema.get("type") != "object":
+            report["problems"].append("tool input schema must be a JSON Schema object with type=object")
+        else:
+            for t in tests:
+                if t.get("args"):
+                    report["problems"].append(f"[{t['name']}] tools take arguments on stdin; args must be []")
+                if t.get("provenance") == "synthetic" and t.get("expected_exit", 0) != 0:
+                    continue  # deliberate bad-input test
+                try:
+                    probs = rt.check_arguments(json.loads(t.get("stdin") or ""), schema, mode="stdin-json")
+                except json.JSONDecodeError:
+                    probs = ["stdin is not a JSON object of arguments"]
+                report["problems"] += [f"[{t['name']}] {p}" for p in probs]
     if proposal["type"] in ("script", "tool"):
         if not tests:
             report["problems"].append("no tests")

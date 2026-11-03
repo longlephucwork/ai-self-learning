@@ -80,8 +80,9 @@ SYSTEM = """You turn a recurring pattern from logged Claude Code sessions into O
 
 Artifact types:
   script = deterministic Python 3 CLI, input -> output fully defined, no AI involved.
-  tool   = a script Claude calls mid-task. Same rules as script, plus tool_input_schema_json: a JSON \
-Schema object for its arguments.
+  tool   = a Python 3 script that Claude calls mid-task through MCP. It reads ONE JSON object of \
+arguments from stdin (described by tool_input_schema_json, a JSON Schema with type=object) and prints \
+its result as text to stdout. Its tests pass the arguments JSON in "stdin", with "args": [].
   skill  = a SKILL.md with YAML frontmatter (name, description) holding only the judgment parts. It \
 calls bundled scripts (under scripts/) for anything exact.
 Use the pattern's suggested type unless the evidence clearly contradicts it. If you deviate, explain \
@@ -207,7 +208,7 @@ def write_draft(d: Path, pattern: dict, prop: dict, attempts: list, flags: list,
     files = {f["path"]: f["content"] for f in prop["files"]}
     if prop["type"] == "tool":
         files["tool.json"] = json.dumps({"name": prop["name"], "description": prop["description"],
-                                         "command": ["python3", prop["entrypoint"]],
+                                         "runner": "stdin-json",
                                          "input_schema": json.loads(prop["tool_input_schema_json"])}, indent=2)
     for p, c in files.items():
         fp = d / "files" / replay.safe_rel(p)

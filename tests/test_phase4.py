@@ -150,7 +150,7 @@ class Phase4(unittest.TestCase):
         self.assertIn("learned: uninstall script csv-to-json", git(self.repo, "log", "-1", "--format=%s"))
         self.assertIn("scripts/csv-to-json/csv_to_json.py", git(self.repo, "show", "--name-only", "--format=", "HEAD"))
 
-    def test_skill_install_symlinks_and_tool_refused(self):
+    def test_skill_install_symlinks_and_tool_target(self):
         self.make_pattern("notes", 0.0, "skill")
         skill = {"type": "skill", "type_deviation_reason": "", "name": "tidy-notes", "description": "Tidy notes",
                  "spec": "s", "entrypoint": "", "tool_input_schema_json": "",
@@ -168,8 +168,9 @@ class Phase4(unittest.TestCase):
         from registry import install
         install.uninstall("tidy-notes")
         self.assertFalse(link.exists() or link.is_symlink())
+        self.assertEqual(install.target_dir("tool", "x"), self.repo / "mcp_tools" / "tools" / "x")
         with self.assertRaises(install.InstallError):
-            install.target_dir("tool", "x")
+            install.target_dir("plugin", "x")
 
     def test_refuses_without_git(self):
         self.draft(proposal())

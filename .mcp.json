@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "learned": {
+      "command": "python3",
+      "args": [
+        "${CLAUDE_PROJECT_DIR:-.}/mcp_tools/server.py"
+      ]
+    }
+  }
+}

@@ -11,7 +11,11 @@ if log:
         fh.write(json.dumps({"args": args, "cwd": os.getcwd(),
                              "disable": os.environ.get("LEARNING_HARNESS_DISABLE")}) + "\n")
 
-if "tests" in schema["properties"]:  # Phase 3 proposal: return a canned file chosen by the test
+if "argv_template_json" in schema["properties"]:  # refine/expose.py
+    key = "FAKE_EXPOSE_FILE_2" if "previous attempt failed" in prompt and os.environ.get("FAKE_EXPOSE_FILE_2") \
+        else "FAKE_EXPOSE_FILE"
+    out = json.load(open(os.environ[key]))
+elif "tests" in schema["properties"]:  # Phase 3 proposal: return a canned file chosen by the test
     key = "FAKE_PROPOSAL_FILE_2" if "previous attempt FAILED" in prompt and os.environ.get("FAKE_PROPOSAL_FILE_2") \
         else "FAKE_PROPOSAL_FILE"
     out = json.load(open(os.environ[key]))

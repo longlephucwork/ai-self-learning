@@ -5,6 +5,7 @@
   refine.py record <name> ok|fail [--note T]   log a use the harness can't see (e.g. run by path)
   refine.py report [--stale-days 60] [--min-failures 2] [--fail-rate 0.3]
   refine.py revise <name> [--model M]          draft v(N+1) from the failures (normal review/approve applies)
+  refine.py expose <script> [--model M]        draft an MCP tool that wraps an installed script (no new code)
   refine.py cycle [--generate N] [--no-detect] one maintenance pass: detect -> draft new candidates -> report
 
 Nothing here installs, uninstalls or changes an artifact. It writes reports
@@ -12,8 +13,8 @@ and drafts. Every change still goes through `review/cli.py approve` or
 `registry/install.py uninstall`.
 
 Where usage comes from:
-  1. store/usage/<name>.jsonl    one line per run, written by the bin/<name> wrapper (exit code,
-                                 terminal vs Claude, and Claude's session id)
+  1. store/usage/<name>.jsonl    one line per run, written by the bin/<name> wrapper or the MCP server
+                                 (exit code, terminal / claude / mcp, and Claude's session id)
   2. session transcripts         tool steps that call bin/<name>, scripts/<name>/..., or Skill(<name>)
   3. manual records              `refine.py record`
 A use that the wrapper logged under a Claude session isn't double-counted from the transcript.
@@ -32,6 +33,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from harness_lib import store  # noqa: E402
+from harness_lib import tools as rt  # noqa: E402
 from registry import install as reg  # noqa: E402
 
 
@@ -54,6 +56,9 @@ def _matchers(entry: dict):
     if entry["type"] == "skill":
         rx = re.compile(rf"(^|:){name}$")
         return lambda st: st["tool_name"] == "Skill" and bool(rx.search(json.loads(st["input_json"]).get("skill", "")))
+    if entry["type"] == "tool":
+        mcp_name = f"mcp__{rt.SERVER_NAME}__{entry['name']}"
+        return lambda st: st["tool_name"] == mcp_name
     rx = re.compile(rf"(bin/{name}\b|scripts/{name}/)")
     return lambda st: st["tool_name"] == "Bash" and bool(rx.search(st["input_json"]))
 
@@ -64,12 +69,14 @@ def collect_uses(entry: dict) -> list[dict]:
     uses = []
     shim_sessions = set()
     for r in store.read_jsonl(usage_log_path(entry["name"])):
-        sid = r.get("session_id")
-        if r.get("via") == "claude" and sid:
+        sid = r.get("session_id") if r.get("via") in ("claude", "mcp") else None
+        if sid:
             shim_sessions.add(sid)
-        uses.append({"source": "wrapper", "at": r["at"], "version": r.get("version"), "via": r.get("via"),
-                     "session_id": sid if r.get("via") == "claude" else None, "exit": r.get("exit"),
-                     "failed": r.get("exit") not in (0, None), "detail": f"exit {r.get('exit')}"})
+        rejected = r.get("rejected")
+        uses.append({"source": "mcp" if r.get("via") == "mcp" else "wrapper", "at": r["at"],
+                     "version": r.get("version"), "via": r.get("via"), "session_id": sid, "exit": r.get("exit"),
+                     "failed": bool(rejected) or r.get("exit") not in (0, None),
+                     "detail": f"rejected arguments: {rejected}" if rejected else f"exit {r.get('exit')}"})
     for r in store.read_jsonl(store.store_dir() / "usage" / "_manual.jsonl"):
         if r.get("name") == entry["name"]:
             uses.append({"source": "manual", "at": r["at"], "via": "manual", "session_id": None,
@@ -103,6 +110,11 @@ def missed_opportunities(entry: dict, uses: list[dict]) -> list[str]:
     pattern = store.load_pattern(entry["pattern_key"]) or {}
     since = _ts(entry["approved_at"])
     used_in = {u["session_id"] for u in uses if u.get("session_id")}
+    # a session that used a sibling artifact of the same pattern (e.g. the MCP tool wrapping this script)
+    # did not miss it
+    for other in reg.load_registry()["installed"].values():
+        if other["name"] != entry["name"] and other["pattern_key"] == entry["pattern_key"]:
+            used_in |= {u["session_id"] for u in collect_uses(other) if u.get("session_id")}
     out = []
     for sid in pattern.get("session_ids", []):
         s = store.load_session(sid) or {}
@@ -119,7 +131,7 @@ def stats(entry: dict) -> dict:
     return {"name": entry["name"], "type": entry["type"], "version": entry["version"],
             "approved_at": entry["approved_at"], "uses": len(uses), "failures": len(fails),
             "fail_rate": round(len(fails) / len(uses), 3) if uses else None,
-            "by_via": {v: sum(u["via"] == v for u in uses) for v in ("terminal", "claude", "manual")},
+            "by_via": {v: sum(u["via"] == v for u in uses) for v in ("terminal", "claude", "mcp", "manual")},
             "last_used": last, "missed": missed_opportunities(entry, uses), "uses_detail": uses}
 
 
@@ -136,7 +148,8 @@ def recommend(st: dict, *, now: datetime, stale_days: int, min_failures: int, fa
         reasons.append(f"unused for {idle} days and the pattern hasn't recurred")
     if st["missed"]:
         reasons.append(f"{len(st['missed'])} later session(s) did this task without using it"
-                       + (" (Claude may not know it exists; consider a skill/tool wrapper)" if st["type"] == "script" else ""))
+                       + (f" (Claude may not know it exists; `refine.py expose {st['name']}` makes it an MCP tool)"
+                          if st["type"] == "script" else ""))
         if action == "keep":
             action = "missed"
     if not reasons:
@@ -225,6 +238,8 @@ def main(argv=None):
     q.add_argument("--no-detect", action="store_true")
     p = sub.add_parser("revise"); p.add_argument("name"); p.add_argument("--model")
     p.add_argument("--max-attempts", type=int, default=2)
+    p = sub.add_parser("expose"); p.add_argument("name"); p.add_argument("--model")
+    p.add_argument("--max-attempts", type=int, default=2)
     a = ap.parse_args(argv)
     installed = reg.load_registry()["installed"]
 
@@ -256,6 +271,8 @@ def main(argv=None):
         if a.name not in installed:
             sys.exit(f"error: {a.name!r} is not installed")
         entry = installed[a.name]
+        if entry.get("wraps"):
+            sys.exit(f"error: {a.name!r} only wraps the script {entry['wraps']!r}; revise that instead")
         rev = revision_input(entry)
         if not rev["failures"]:
             sys.exit(f"error: no recorded failures for {a.name}; nothing to revise")
@@ -271,6 +288,19 @@ def main(argv=None):
         if r["passed"]:
             name = Path(r["draft"]).name
             print(f"review: python3 review/cli.py diff {name}  then  python3 review/cli.py approve {name}")
+        return 0 if r["passed"] else 1
+    elif a.cmd == "expose":
+        from harness_lib.claude_cli import ClaudeError
+        from refine.expose import expose
+        try:
+            r = expose(a.name, model=a.model, max_attempts=a.max_attempts)
+        except (LookupError, ValueError, ClaudeError) as e:
+            sys.exit(f"error: {e}")
+        print(f"\n{'VALIDATED' if r['passed'] else 'NOT VALIDATED'}: {r['draft']}  (${r['cost_usd']:.3f})")
+        from validate import replay
+        replay.print_report(r["report"])
+        if r["passed"]:
+            print(f"review: python3 review/cli.py review {r['name']}  then  python3 review/cli.py approve {r['name']}")
         return 0 if r["passed"] else 1
     elif a.cmd == "cycle":
         if not a.no_detect:

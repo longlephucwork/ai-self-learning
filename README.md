@@ -3,7 +3,7 @@
 Turns repeated Claude Code work into reusable skills, scripts and tools. **Nothing installs without explicit human approval.**
 
 Pipeline: CAPTURE → DETECT → CLASSIFY → GENERATE → VALIDATE → APPROVE → REGISTER → REFINE.
-Status: **All five phases are done** (Capture, Detect + classify, Generate + validate, Review + register, Refine). Only the MCP tool server (`mcp_tools/server.py`) is still a stub, so `tool`-type artifacts can't be installed yet. Nothing is ever installed without your explicit approval.
+Status: **All five phases are done**, plus the MCP tool server that lets Claude find and call approved tools by itself. Nothing is ever installed without your explicit approval.
 
 ## Phase 1: Capture
 
@@ -133,7 +133,7 @@ python3 registry/install.py uninstall csv-to-json --reason "..."
 |---|---|---|
 | script | `scripts/<name>/`, plus the usage wrapper `bin/<name>` | Run `bin/<name> ...` (or add `bin/` to `PATH`) so usage is tracked |
 | skill | `skills/<name>/`, plus a symlink `~/.claude/skills/<name>` pointing to it | Git stays the source of truth; reverting the commit reverts the skill |
-| tool | not yet | Needs `mcp_tools/server.py`, which isn't built; approval refuses with a clear message |
+| tool | `mcp_tools/tools/<name>/` | Served by `mcp_tools/server.py`; Claude sees it as `mcp__learned__<name>` |
 
 `registry.json` records each installed artifact: version, pattern, evidence sessions, file hashes, test results, approval time and note, and a usage counter for Phase 5. It also keeps a `history` of installs and uninstalls.
 
@@ -164,7 +164,7 @@ Nothing in Phase 5 installs, uninstalls or edits an artifact. It writes reports 
 **Recommendations** (thresholds are flags on `report`/`cycle`):
 - `revise`: at least `--min-failures` (2) failures and a failure rate of at least `--fail-rate` (30%).
 - `retire`: unused for `--stale-days` (60) and the pattern hasn't recurred. Next step: `registry/install.py uninstall`.
-- `missed`: later sessions in the same pattern didn't use the artifact. For scripts this usually means Claude doesn't know it exists; a skill or tool wrapper is the fix.
+- `missed`: later sessions in the same pattern didn't use the artifact. For scripts this usually means Claude doesn't know it exists; `refine.py expose <script>` makes it an MCP tool.
 - `reconsider`: a rejected pattern now has at least twice the successes it had when rejected (`propose.py --force` to redraft).
 
 **Revisions** keep the installed name, type and entrypoint. **Every previous test is re-added unchanged as `regression: <name>`**, and any model test with that name is discarded, so a revision can't weaken existing behaviour. The draft goes to `generated/<name>-v<N+1>/`; approving it installs v<N+1> (`learned: update script ...`). The pattern stays `installed` and shows `pending_revision` until then.
@@ -174,3 +174,41 @@ Nothing in Phase 5 installs, uninstalls or edits an artifact. It writes reports 
 17 3 * * 0  cd /path/to/learning-harness && python3 refine/refine.py cycle --generate 1 >> store/cycle.log 2>&1
 ```
 Drafts produced overnight still wait for `review/cli.py approve`.
+
+## MCP tool server (`mcp_tools/server.py`)
+
+**Not a hosted server.** It's a local Python script (standard library only) that Claude Code starts as a child process when a session begins. They talk over stdin/stdout, one JSON-RPC message per line (the MCP stdio transport), and the script exits when the session ends. No port, no daemon, no network.
+
+**Register it once:**
+```bash
+claude mcp add --scope user learned -- python3 /home/user/claude-learning-harness/mcp_tools/server.py
+```
+That makes it available in every project. Sessions inside this repo also pick it up from `.mcp.json` (project scope); interactive sessions ask you to approve project servers the first time. Check with `claude mcp list`.
+
+**What it does:**
+- `tools/list` returns the `tool` entries in `registry.json`, with their schema and a description that says how many past sessions they were learned from. The registry is re-read on every request, and a `notifications/tools/list_changed` message is sent when it changes, so approving or uninstalling a tool reaches running sessions.
+- `tools/call`:
+  1. checks the arguments against the schema (unknown keys and values starting with `-` are rejected)
+  2. runs the tool in the project directory (`$CLAUDE_PROJECT_DIR`) without network (`unshare -rn`), with a scrubbed environment, CPU/memory/file-size limits and a 60s timeout
+  3. returns stdout/stderr, with `isError` set on a non-zero exit
+  4. appends a usage line (`via: "mcp"`, exit code, Claude's session id, never arguments) to `store/usage/<tool>.jsonl` for Phase 5
+- Protocol versions `2025-11-25`, `2025-06-18`, `2025-03-26` and `2024-11-05`.
+- Set `LEARNING_HARNESS_MCP_LOG=/path/file` to trace the method names it receives.
+
+**Two kinds of tool:**
+| Kind | How it's made | How it runs |
+|---|---|---|
+| Exposed script | `refine.py expose <script>`: Claude drafts only a schema and an argv template, no code | Arguments are rendered into the installed script's command line, e.g. `["{input}", "{output}", {"when": "delimiter", "argv": ["--delimiter", "{delimiter}"]}]` |
+| Generated tool | `propose.py` for a pattern classified as `tool` | `python3 <entrypoint>` with the arguments as one JSON object on stdin |
+
+**Validation:**
+- An exposed script passes only if the template renders **exactly** the command line of every validated test of the script, and those tests pass again against the installed script.
+- A generated tool's tests must send stdin JSON that matches its schema.
+- Both go through the normal `review/cli.py approve`.
+- A script can't be uninstalled while a tool wraps it (`--force` overrides).
+
+```bash
+python3 refine/refine.py expose csv-to-json        # drafts generated/csv_to_json/
+python3 review/cli.py review csv_to_json
+python3 review/cli.py approve csv_to_json
+```
