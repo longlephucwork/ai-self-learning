@@ -151,7 +151,16 @@ class Phase3(unittest.TestCase):
         hollow = {**test_case("s-fruit"), "expected_files": []}
         self.fake(proposal(tests=[hollow, test_case("s-price"), test_case("s-kv", "derived_from_feedback", '[{"k":"x","v":1}]')]))
         r = self.run_propose(max_attempts=1)
-        self.assertTrue(any("checks no output" in p for p in r["problems"]), r["problems"])
+        self.assertTrue(any("checks nothing" in p for p in r["problems"]), r["problems"])
+
+    def test_expected_error_exit_counts_as_a_check(self):
+        ragged = {**test_case("s-fruit"), "name": "bad", "provenance": "synthetic", "args": ["nope.csv", "o.json"],
+                  "expected_files": [], "expected_exit": 2}
+        err = {**test_case("s-price"), "expected_files": [], "expected_exit": 2, "args": ["missing.csv", "o.json"]}
+        self.fake(proposal(tests=[test_case("s-fruit"), err, ragged,
+                                  test_case("s-kv", "derived_from_feedback", '[{"k":"x","v":1}]')]))
+        r = self.run_propose(max_attempts=1)
+        self.assertTrue(r["passed"], r["problems"])
 
     def test_coverage_required(self):
         self.fake(proposal(tests=[test_case("s-fruit")]))

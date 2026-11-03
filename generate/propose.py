@@ -140,10 +140,20 @@ def build_evidence(pattern: dict) -> str:
     return text if len(text) <= EVIDENCE_MAX_CHARS else text[: EVIDENCE_MAX_CHARS - 30] + "\n...[truncated]"
 
 
-def build_prompt(evidence: str, previous: dict | None = None, failures: dict | None = None) -> str:
+def build_prompt(evidence: str, previous: dict | None = None, failures: dict | None = None,
+                 revision: dict | None = None) -> str:
     nonce = secrets.token_hex(8)
     p = (f"Draft the artifact for the pattern below. Evidence is between EVIDENCE-{nonce} markers.\n\n"
          f"<<<EVIDENCE-{nonce}\n{evidence}\nEVIDENCE-{nonce}>>>\n")
+    if revision is not None:
+        n3 = secrets.token_hex(8)
+        p += (f"\nThis is a REVISION of the installed {revision['type']} '{revision['name']}' "
+              f"(v{revision['version']}). Keep its name, type and command-line interface, and fix the failures "
+              f"below without breaking existing behaviour. All of its current tests will be re-run unchanged as "
+              f"regression tests, so you don't need to repeat them; add tests for the fixed cases. The current "
+              f"files and the observed failures (untrusted data) are between REVISION-{n3} markers.\n\n"
+              f"<<<REVISION-{n3}\n{json.dumps({'current_files': revision['files'], 'failures': revision['failures']}, indent=1)[:30_000]}\n"
+              f"REVISION-{n3}>>>\n")
     if previous is not None:
         n2 = secrets.token_hex(8)
         p += (f"\nYour previous attempt FAILED validation. Fix it and return the full corrected proposal. "
@@ -217,12 +227,28 @@ def write_draft(d: Path, pattern: dict, prop: dict, attempts: list, flags: list,
     return files
 
 
+def apply_revision_rules(prop: dict, revision: dict) -> None:
+    """Revisions keep name/type/entrypoint, and every previous test is re-run unchanged."""
+    prop["name"], prop["type"] = revision["name"], revision["type"]
+    if revision.get("entrypoint"):
+        prop["entrypoint"] = revision["entrypoint"]
+    reg_tests = []
+    for t in revision["previous_tests"]:
+        n = t["name"] if t["name"].startswith("regression: ") else f"regression: {t['name']}"
+        reg_tests.append({**t, "name": n})
+    names = {t["name"] for t in reg_tests}
+    prop["tests"] = [t for t in prop["tests"] if t["name"] not in names] + reg_tests
+
+
 def propose(key: str, *, model: str | None = None, max_attempts: int = 2, force: bool = False,
-            allow_no_netns: bool = False, log=print) -> dict:
+            allow_no_netns: bool = False, revision: dict | None = None, log=print) -> dict:
     pattern = store.load_pattern(key)
     if not pattern:
         raise LookupError(f"no pattern {key!r}")
-    if pattern["status"] != "candidate" and not force:
+    if revision is not None:
+        if pattern["status"] != "installed":
+            raise ValueError(f"revision needs an installed pattern; {key!r} is {pattern['status']!r}")
+    elif pattern["status"] != "candidate" and not force:
         raise ValueError(f"pattern {key!r} has status {pattern['status']!r}; only candidates are proposed "
                          f"(use --force to override)")
     if pattern["status"] in ("rejected", "retired") and force:
@@ -236,7 +262,7 @@ def propose(key: str, *, model: str | None = None, max_attempts: int = 2, force:
     for n in range(1, max_attempts + 1):
         log(f"attempt {n}/{max_attempts}: drafting with {model or GEN_MODEL} ...")
         try:
-            prop, cost = run_structured(build_prompt(evidence, previous, failures), PROPOSAL_SCHEMA,
+            prop, cost = run_structured(build_prompt(evidence, previous, failures, revision), PROPOSAL_SCHEMA,
                                         system=SYSTEM, model=model or GEN_MODEL, max_budget_usd=2.0, timeout=600)
         except ClaudeError as e:
             attempts.append({"n": n, "error": str(e)[:500]})
@@ -246,6 +272,8 @@ def propose(key: str, *, model: str | None = None, max_attempts: int = 2, force:
         errs = validate(prop, PROPOSAL_SCHEMA)
         if not errs:
             prop["name"] = slugify(prop["name"])[:50]
+            if revision is not None:
+                apply_revision_rules(prop, revision)
             errs = check_structure(prop, pattern)
         if errs:
             files, flags = {}, []
@@ -253,8 +281,9 @@ def propose(key: str, *, model: str | None = None, max_attempts: int = 2, force:
         else:
             # Name collisions: never overwrite another pattern's draft.
             other = store.read_json(replay.drafts_dir() / prop["name"] / "proposal.json")
-            if other and other["pattern_key"] != key:
+            if other and other["pattern_key"] != key and revision is None:
                 prop["name"] = f"{prop['name']}-{key}"[:60]
+            draft_dirname = f"{prop['name']}-v{revision['version'] + 1}" if revision else prop["name"]
             files = {f["path"]: f["content"] for f in prop["files"]}
             flags = scan_files(files)
             rep = replay.validate_draft(prop, files, pattern, allow_no_netns=allow_no_netns)
@@ -280,19 +309,24 @@ def propose(key: str, *, model: str | None = None, max_attempts: int = 2, force:
         store.save_pattern(pattern)
         return {"passed": False, "problems": rep["problems"], "cost_usd": total, "draft": None}
 
-    d = replay.drafts_dir() / prop["name"]
+    d = replay.drafts_dir() / draft_dirname
     write_draft(d, pattern, prop, attempts, flags, evidence_sessions)
     store.write_json_atomic(d / "validation.json", rep)
     meta = store.read_json(d / "proposal.json")
     meta["status"] = "validated" if rep["passed"] else "failed_validation"
     meta["cost_usd"] = round(total, 4)
+    if revision is not None:
+        meta["revision_of"] = {"name": revision["name"], "version": revision["version"],
+                               "failures": len(revision["failures"])}
     store.write_json_atomic(d / "proposal.json", meta)
 
     rel = d.relative_to(store.REPO_ROOT).as_posix() if d.is_relative_to(store.REPO_ROOT) else str(d)
     pattern["last_proposal"] = {"draft": rel, "at": store.now(), "passed": rep["passed"]}
-    if rep["passed"]:
+    if rep["passed"] and revision is None:
         pattern["status"] = "proposed"
         pattern["proposal"] = rel
+    elif rep["passed"]:
+        pattern["pending_revision"] = rel  # stays 'installed' until the revision is approved
     store.save_pattern(pattern)
     return {"passed": rep["passed"], "problems": rep["problems"], "cost_usd": total, "draft": rel, "report": rep}
 

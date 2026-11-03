@@ -3,7 +3,7 @@
 Turns repeated Claude Code work into reusable skills, scripts and tools. **Nothing installs without explicit human approval.**
 
 Pipeline: CAPTURE → DETECT → CLASSIFY → GENERATE → VALIDATE → APPROVE → REGISTER → REFINE.
-Status: **Phases 1–4 are done** (Capture, Detect + classify, Generate + validate, Review + register). Phase 5 (Refine) and the MCP tool server are stubs. Nothing is ever installed without your explicit approval.
+Status: **All five phases are done** (Capture, Detect + classify, Generate + validate, Review + register, Refine). Only the MCP tool server (`mcp_tools/server.py`) is still a stub, so `tool`-type artifacts can't be installed yet. Nothing is ever installed without your explicit approval.
 
 ## Phase 1: Capture
 
@@ -131,7 +131,7 @@ python3 registry/install.py uninstall csv-to-json --reason "..."
 **Where things go (`registry/install.py`):**
 | Type | Installed to | Notes |
 |---|---|---|
-| script | `scripts/<name>/` | Entrypoint made executable: `python3 scripts/<name>/<entry> --help` |
+| script | `scripts/<name>/`, plus the usage wrapper `bin/<name>` | Run `bin/<name> ...` (or add `bin/` to `PATH`) so usage is tracked |
 | skill | `skills/<name>/`, plus a symlink `~/.claude/skills/<name>` pointing to it | Git stays the source of truth; reverting the commit reverts the skill |
 | tool | not yet | Needs `mcp_tools/server.py`, which isn't built; approval refuses with a clear message |
 
@@ -140,3 +140,37 @@ python3 registry/install.py uninstall csv-to-json --reason "..."
 **Git:** install, reject and uninstall each make one commit (`learned: install script csv-to-json v1`, with the evidence and test counts in the body). The commit covers **only** the paths that action touched, so unrelated work in your tree is never swept in. To undo a learned habit, run `registry/install.py uninstall`, or `git revert` the commit.
 
 **Rejections are remembered:** the pattern is locked as `rejected` with your reason. `propose.py` won't draft it again (except with `--force`), and re-clustering keeps the status.
+
+## Phase 5: Refine
+
+```bash
+python3 refine/refine.py usage                    # per installed item: uses, failures, sessions, missed
+python3 refine/refine.py report                   # keep / revise / retire / missed / reconsider
+python3 refine/refine.py revise csv-to-json       # drafts generated/csv-to-json-v2 from the failures
+python3 review/cli.py diff csv-to-json-v2         # then approve or reject as usual
+python3 refine/refine.py record csv-to-json fail --note "..."   # a use the harness couldn't see
+python3 refine/refine.py cycle --generate 1       # detect -> draft new candidates -> report
+```
+Nothing in Phase 5 installs, uninstalls or edits an artifact. It writes reports and drafts, and every change still goes through `approve` or `uninstall`.
+
+**Where usage comes from:**
+| Source | What it gives |
+|---|---|
+| `bin/<name>` wrapper -> `store/usage/<name>.jsonl` | One line per run: time, exit code, duration, version, `terminal` or `claude`, and the Claude session id (`CLAUDE_CODE_SESSION_ID`). Never arguments, contents or output. Harness code, not learned code. |
+| Session transcripts | Bash steps calling `bin/<name>` or `scripts/<name>/`, and `Skill` calls for installed skills, with the step's error flag. Not double-counted when the wrapper already logged that session. |
+| Ratings | Any use inside a session rated `redone` counts as a failure; the rating note is passed on as evidence. |
+| `refine.py record` | Manual entries for uses outside both. |
+
+**Recommendations** (thresholds are flags on `report`/`cycle`):
+- `revise`: at least `--min-failures` (2) failures and a failure rate of at least `--fail-rate` (30%).
+- `retire`: unused for `--stale-days` (60) and the pattern hasn't recurred. Next step: `registry/install.py uninstall`.
+- `missed`: later sessions in the same pattern didn't use the artifact. For scripts this usually means Claude doesn't know it exists; a skill or tool wrapper is the fix.
+- `reconsider`: a rejected pattern now has at least twice the successes it had when rejected (`propose.py --force` to redraft).
+
+**Revisions** keep the installed name, type and entrypoint. **Every previous test is re-added unchanged as `regression: <name>`**, and any model test with that name is discarded, so a revision can't weaken existing behaviour. The draft goes to `generated/<name>-v<N+1>/`; approving it installs v<N+1> (`learned: update script ...`). The pattern stays `installed` and shows `pending_revision` until then.
+
+**Scheduled runs (optional):** `cycle` costs about $0.001 per new session for summaries, plus about $0.05–0.15 per drafted artifact. A weekly cron entry:
+```
+17 3 * * 0  cd /path/to/learning-harness && python3 refine/refine.py cycle --generate 1 >> store/cycle.log 2>&1
+```
+Drafts produced overnight still wait for `review/cli.py approve`.

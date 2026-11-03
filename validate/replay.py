@@ -227,8 +227,10 @@ def validate_draft(proposal: dict, files: dict[str, str], pattern: dict, *, allo
     for t in tests:
         probs = check_provenance(t, members, cache)
         if proposal["type"] in ("script", "tool") and t.get("provenance") in ("logged", "derived_from_feedback") \
-                and not t.get("expected_files") and t.get("stdout_compare", "ignore") == "ignore":
-            probs.append("checks no output (needs expected_files or stdout_compare), so it can't count as evidence")
+                and not t.get("expected_files") and t.get("stdout_compare", "ignore") == "ignore" \
+                and t.get("expected_exit", 0) == 0:
+            probs.append("checks nothing (needs expected_files, stdout_compare or a non-zero expected_exit), "
+                         "so it can't count as evidence")
         report["provenance"].append({"name": t["name"], "provenance": t.get("provenance"), "problems": probs})
         if probs:
             report["problems"] += [f"[{t['name']}] {p}" for p in probs]
