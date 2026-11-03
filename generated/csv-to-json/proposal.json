@@ -2,7 +2,7 @@
   "name": "csv-to-json",
   "type": "script",
   "pattern_key": "csv-to-json-conversion",
-  "status": "validated",
+  "status": "installed",
   "description": "Convert a CSV file with a header row into a JSON array of objects (numeric fields as numbers) and print a one-line confirmation.",
   "spec": "CLI: python3 csv_to_json.py INPUT.csv OUTPUT.json. Reads CSV (UTF-8, first row is header), writes a JSON array of objects keyed by header names, indent=2, ensure_ascii=False, trailing newline. Values matching an integer (-?\\d+, no leading zeros except \"0\") become ints; values matching a decimal (-?\\d+\\.\\d+) become floats; everything else (including empty strings) stays a string. Blank lines are skipped. Missing cells become \"\". Rows with more cells than headers, a missing/empty header, or a missing input file give an error on stderr and non-zero exit. On success prints one line: \"Wrote N rows to OUTPUT\". Note: one logged session (kv.csv) kept \"1\" as a string, but the user edited it saying they wanted v as a number; so all numeric-looking fields are converted, in every column (not only 'id'), following the accepted sessions and feedback.",
   "type_deviation_reason": "",
@@ -163,5 +163,10 @@
     }
   ],
   "created_at": "2026-11-03T04:05:38+00:00",
-  "cost_usd": 0.0519
+  "cost_usd": 0.0519,
+  "decision": {
+    "decision": "approved",
+    "at": "2026-11-03T04:15:09+00:00",
+    "note": "approved by the user in chat"
+  }
 }
