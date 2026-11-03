@@ -110,3 +110,58 @@ for _n in [n for n in vars(p4.Phase4) if n.startswith("test_")]:
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SkillStandard(unittest.TestCase):
+    """The Claude skill standard, as checked by skill-creator's quick_validate.py."""
+
+    def probs(self, fm, body="Do the thing.\n", name="notes-skill", extra_files=None):
+        from validate.replay import skill_standard_problems
+        files = {"SKILL.md": f"---\n{fm}\n---\n\n{body}", **(extra_files or {})}
+        return skill_standard_problems(files, expected_name=name)
+
+    def test_valid(self):
+        self.assertEqual(self.probs("name: notes-skill\ndescription: Write notes. Use when asked for notes."), [])
+
+    def test_rules(self):
+        cases = {
+            "name: Notes_Skill\ndescription: d": "kebab-case",
+            "name: -notes\ndescription: d": "start or end with a hyphen",
+            "name: notes--skill\ndescription: d": "contain '--'",
+            f"name: {'a' * 65}\ndescription: d": "maximum is 64",
+            "name: notes-skill\ndescription: use <this>": "angle brackets",
+            f"name: notes-skill\ndescription: {'x' * 1025}": "maximum is 1024",
+            "name: notes-skill\ndescription: d\nversion: 2": "unexpected frontmatter key(s): version",
+            "description: d": "missing 'name'",
+            "name: notes-skill": "missing 'description'",
+            "name: other-name\ndescription: d": "must match the skill's folder name",
+            f"name: notes-skill\ndescription: d\ncompatibility: {'c' * 501}": "compatibility",
+        }
+        for fm, want in cases.items():
+            with self.subTest(fm=fm[:40]):
+                self.assertTrue(any(want in p for p in self.probs(fm, name="notes-skill")), (fm, self.probs(fm)))
+        self.assertTrue(any("under 500" in p for p in self.probs("name: notes-skill\ndescription: d", body="x\n" * 600)))
+        self.assertTrue(any("exactly one SKILL.md" in p for p in self.probs(
+            "name: notes-skill\ndescription: d", extra_files={"references/SKILL.md": "x"})))
+        self.assertEqual(self.probs("name: notes-skill\ndescription: d", extra_files={"evals/case/SKILL.md": "x"}), [])
+        from validate.replay import skill_standard_problems
+        self.assertIn("no YAML frontmatter", skill_standard_problems({"SKILL.md": "# no frontmatter"})[0])
+
+    def test_official_checker_agrees_when_installed(self):
+        from validate.replay import find_skill_creator, official_skill_check
+        if find_skill_creator() is None:
+            self.skipTest("skill-creator isn't installed here")
+        good = official_skill_check({"SKILL.md": "---\nname: notes-skill\ndescription: Write notes.\n---\n\nBody.\n"})
+        self.assertTrue(good["ran"] and good["valid"], good)
+        bad = official_skill_check({"SKILL.md": "---\nname: notes-skill\ndescription: use <this>\n---\n\nBody.\n"})
+        self.assertTrue(bad["ran"] and not bad["valid"], bad)
+        self.assertIn("angle brackets", bad["message"])
+
+    def test_builtin_learning_harness_skill_meets_the_standard(self):
+        import install
+        from validate.replay import official_skill_check, skill_standard_problems
+        files = {"SKILL.md": install.builtin_skill_text()}
+        self.assertEqual(skill_standard_problems(files, expected_name="learning-harness"), [])
+        r = official_skill_check(files)
+        if r["ran"]:
+            self.assertTrue(r["valid"], r)

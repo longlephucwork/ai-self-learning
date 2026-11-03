@@ -138,6 +138,10 @@ def cmd_review(args):
     bar = "=" * 78
     print(bar)
     print(f"PROPOSAL  {proposal['name']}   type={proposal['type']}   status={proposal['status']}")
+    if proposal.get("quick"):
+        print("Quick learn: drafted from a single session, so the evidence is one example")
+    if proposal.get("promotes"):
+        print(f"Promotion: replaces the skill {proposal['promotes']['skill']} with code (muscle memory)")
     print(f"Evidence: pattern '{proposal['pattern_key']}' seen {ev['n_sessions']} times, {ev['n_success']} successful "
           f"(counting {', '.join(pattern.get('success_outcomes', ['?']))})")
     print(bar)
@@ -264,6 +268,11 @@ def cmd_approve(args):
     if proposal["type"] == "tool":
         how = f"wraps the installed script {proposal['wraps']['script']}" if proposal.get("wraps") else "new code"
         print(f"  served by the MCP server as mcp__learned__{proposal['name']} ({how})")
+    if proposal.get("promotes"):
+        print(f"  and retire the skill {proposal['promotes']['skill']}: Claude will call the tool instead of "
+              f"reasoning through the task")
+    if proposal.get("quick"):
+        print("  note: learned from a single session (quick learn)")
     if not args.yes:
         if not sys.stdin.isatty():
             print("not approved: approval needs an interactive terminal (or an explicit --yes)", file=sys.stderr)
@@ -278,6 +287,10 @@ def cmd_approve(args):
         return 1
     print(f"installed {e['type']} {e['name']} v{e['version']} at {e['path']}" +
           (f" (commit {e['commit']})" if e.get("commit") else ""))
+    from refine import memory
+    retired = memory.after_approve(proposal)
+    if retired:
+        print(f"retired skill {retired}: this job now runs as code (undo: python3 refine/refine.py demote {e['name']})")
     if e["type"] == "script":
         print(f"run it: python3 {reg.install_root() / e['path'] / e['entrypoint']} --help")
     if e["type"] == "tool":

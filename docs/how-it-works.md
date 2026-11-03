@@ -113,9 +113,17 @@ If validation passes, the pattern's status becomes `proposed` and it waits for P
 | Sandbox (`validate/replay.py`) | Each test runs in a fresh temp dir under `unshare -rn` (no network), with `python3 -I`, an environment of only `PATH`/`LANG`/`HOME`, CPU 10s, 512MB memory, 10MB max file size and a 20s timeout. If network isolation is unavailable, it refuses to run unless `--allow-no-netns` is passed. |
 
 **Skills** are validated differently, because a skill is instructions rather than code:
-1. **Structure:** frontmatter `name` and `description`; every `scripts/...` it mentions exists. Bundled scripts must be run from the skill's base directory, which Claude Code shows when the skill loads, never by a bare relative path (Claude runs commands from the project folder).
-2. **Bundled scripts are tested** in the sandbox, like scripts. Each test names its `script`. Their expected outputs are usually intermediate data that never appears in the logs, so these tests are normally `synthetic`. They must pass, but they aren't evidence for the skill.
-3. **Judged checks** (`validate/judge.py`) are the evidence. For each successful session (up to 5), a model with no tools sees the skill, the session's request, steps and accepted result, and your rating note. It decides whether following the skill would produce what you accepted, including the correction in an `edited` note. Every check must pass, for at least `min(3, successful sessions)`. This is a model's judgment, not execution, and `review` shows each verdict with the rules it checked. It runs only after everything cheaper has passed, uses `claude-sonnet-5-5` by default (`$LEARNING_HARNESS_JUDGE_MODEL`), and results are cached by content, so re-validating or approving an unchanged draft costs nothing.
+1. **The Claude skill standard.** The rules of `skill-creator`'s `scripts/quick_validate.py`:
+   - exactly one `SKILL.md`
+   - YAML frontmatter with only `name`, `description`, `license`, `allowed-tools`, `metadata` or `compatibility`
+   - `name` kebab-case, at most 64 characters, and matching the skill's folder
+   - `description` at most 1024 characters, with no `<` or `>`
+   - the body under 500 lines
+   
+   When `skill-creator` is installed, its own checker also runs on the draft, and must agree. The drafting prompt follows `skill-creator`'s writing guidance: the description says what the skill does and when to use it, and the instructions explain why rather than shouting MUST.
+2. **Structure:** frontmatter `name` and `description`; every `scripts/...` it mentions exists. Bundled scripts must be run from the skill's base directory, which Claude Code shows when the skill loads, never by a bare relative path (Claude runs commands from the project folder).
+3. **Bundled scripts are tested** in the sandbox, like scripts. Each test names its `script`. Their expected outputs are usually intermediate data that never appears in the logs, so these tests are normally `synthetic`. They must pass, but they aren't evidence for the skill.
+4. **Judged checks** (`validate/judge.py`) are the evidence. For each successful session (up to 5), a model with no tools sees the skill, the session's request, steps and accepted result, and your rating note. It decides whether following the skill would produce what you accepted, including the correction in an `edited` note. Every check must pass, for at least `min(3, successful sessions)`. This is a model's judgment, not execution, and `review` shows each verdict with the rules it checked. It runs only after everything cheaper has passed, uses `claude-sonnet-5-5` by default (`$LEARNING_HARNESS_JUDGE_MODEL`), and results are cached by content, so re-validating or approving an unchanged draft costs nothing.
 
 **Note:** tests are built from real session data, so drafts contain (redacted) snippets of your sessions. They stay in your local `learned/` repo and are never pushed.
 
@@ -274,3 +282,32 @@ echo "1.1.0" > VERSION && git commit -am "Release 1.1.0"
 git tag -a v1.1.0 -m "What changed, in a few lines (shown to users)"
 git push origin main v1.1.0
 ```
+
+## Quick learn (`refine/learn.py`)
+
+`refine.py learn [session]` drafts from **one** session right away, with no waiting for 3 repeats. With no argument it uses the current Claude Code session (`CLAUDE_CODE_SESSION_ID`), else your last one. The installer adds a small built-in skill, `~/.claude/skills/learning-harness/SKILL.md` (part of the harness, not learned), so saying **"learn this"** makes Claude run it for you.
+
+1. Asking to learn a session counts as accepting it, so an unrated session is rated `accepted`. A session rated `redone`, or flagged for prompt injection, is refused.
+2. The session is summarised, gets its own single-session pattern, and is drafted with the normal validation: tests from its real inputs and outputs, or for a skill, a judged check against it.
+3. The draft is labelled "quick learn: one session" in `review`, and still waits for your approval.
+
+To make the background run do this for every task, set `"min_success": 1` under `"auto"` in `store/config.json` (default 3). It drafts much more, so it costs more.
+
+## Muscle memory (`refine/memory.py`)
+
+The harness has two levels, like a person learning a task:
+
+| Level | Artifact | Who does the work |
+|---|---|---|
+| Thinking | skill | Claude reads the instructions and reasons through the task every time |
+| Automatic | MCP tool | code does the job; Claude makes one call and doesn't reason through it |
+
+- **Practice:** every use of a skill is tracked. Accuracy is the share of uses whose session you accepted; `edited` and `redone` don't count as accurate. `refine.py report` shows each skill's uses, accuracy and level.
+- **Automate:** a skill used at least `promote_min_uses` (5) times, with accuracy of at least `promote_min_accuracy` (0.9), whose uses were mostly mechanical (`promote_min_mechanical`, 0.75, of their sessions summarised as deterministic), is reported as `promote`. The background run can draft it too.
+  - `refine.py promote <skill>` drafts a tool whose tests are the real inputs and outputs of those uses.
+  - Approving it installs the tool and retires the skill, so Claude stops loading it.
+- **Judgment stays thinking:** a skill whose uses need judgment (writing, deciding) is never promoted. No script can reproduce judgment, and the report says so.
+- **Relearn:** a promoted tool that keeps failing is reported as `demote`. `refine.py demote <tool>` restores the original skill from `learned/` and removes the tool, so Claude reasons through the task again.
+- **Forgetting:** anything unused for 60 days is suggested for retirement.
+
+The thresholds are in `store/config.json` under `"auto"`. Nothing changes without your approval.

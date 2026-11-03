@@ -8,10 +8,14 @@ One run:
   1. infer an outcome for each finished, unrated session (Haiku; a rating you give always wins)
   2. summarise new sessions and group them into patterns
   3. draft up to `max_drafts_per_run` new candidates (a failed candidate is retried after `retry_days`)
+  4. with any drafts left in that budget, propose promotions: skills practised often and accurately on
+     mechanical inputs become tools (refine/memory.py)
 
 Settings, in store/config.json under "auto" (defaults shown):
   enabled: false   monthly_budget_usd: 5.0   min_hours_between_runs: 24   min_new_sessions: 3
   max_drafts_per_run: 1   retry_days: 7   min_confidence: 0.6
+  min_success: 3   (successful sessions before a task is learned; 1 = learn every task after one success)
+  promote_min_uses: 5   promote_min_accuracy: 0.9   promote_min_mechanical: 0.75
 Every model call's cost goes to store/spend.jsonl. Background runs stop when the month's spend reaches
 the budget, and each call's own limit is capped at what remains.
 """
@@ -30,7 +34,8 @@ from harness_lib.claude_cli import DEFAULT_MODEL, ClaudeError, budget_remaining,
 from harness_lib.schema_check import validate
 
 DEFAULTS = {"enabled": False, "monthly_budget_usd": 5.0, "min_hours_between_runs": 24, "min_new_sessions": 3,
-            "max_drafts_per_run": 1, "retry_days": 7, "min_confidence": 0.6}
+            "max_drafts_per_run": 1, "retry_days": 7, "min_confidence": 0.6, "min_success": 3,
+            "promote_min_uses": 5, "promote_min_accuracy": 0.9, "promote_min_mechanical": 0.75}
 LOCK_STALE_S = 2 * 3600
 _children: list = []   # keep spawned runs referenced, so their handles aren't collected while they run
 
@@ -254,7 +259,7 @@ def run(*, force: bool = False) -> dict:
             except (ClaudeError, ValueError) as e:
                 log(f"  grouping with claude failed ({str(e)[:100]}); grouping by family")
                 clusters, method = cl.group_by_family(summaries), "family"
-            rows = cl.apply_clusters(clusters, summaries, method=method)
+            rows = cl.apply_clusters(clusters, summaries, method=method, min_success=int(cfg["min_success"]))
             result["candidates"] = [r["key"] for r in rows if r["status"] == "candidate"]
 
         from generate.propose import propose
@@ -269,6 +274,23 @@ def run(*, force: bool = False) -> dict:
                 log(f"  drafting {p['key']} failed: {str(e)[:150]}")
                 if "budget" in str(e):
                     break
+        # 4. muscle memory: practised, accurate, mechanical skills become tools
+        from refine import memory
+        from registry import install as reg
+        left = cfg["max_drafts_per_run"] - len(drafted)
+        for e in list(reg.load_registry()["installed"].values()):
+            if left <= 0:
+                break
+            if e["type"] != "skill" or memory.promotion_status(e)[0] != "ready":
+                continue
+            try:
+                r = memory.promote(e["name"], log=lambda m: log(m))
+                drafted.append({"promotes": e["name"], "passed": r["passed"], "draft": r["draft"]})
+                log(f"  promotion of {e['name']}: {'validated' if r['passed'] else 'not validated'} -> {r['draft']}")
+            except (ClaudeError, LookupError, ValueError) as ex:
+                drafted.append({"promotes": e["name"], "passed": False, "error": str(ex)[:200]})
+                log(f"  promoting {e['name']} failed: {str(ex)[:150]}")
+            left -= 1
         result["drafted"] = drafted
     except Exception as e:  # a background run must never leave the lock behind
         result["error"] = repr(e)[:300]
@@ -310,6 +332,7 @@ def inbox() -> list[dict]:
             continue
         v = store.read_json(d / "validation.json") or {}
         out.append({"draft": d.name, "name": m["name"], "type": m["type"], "pattern": m["pattern_key"],
+                    "promotes": (m.get("promotes") or {}).get("skill"), "quick": bool(m.get("quick")),
                     "n_sessions": m.get("evidence", {}).get("n_sessions"),
                     "n_success": m.get("evidence", {}).get("n_success"),
                     "tests": f"{sum(t['passed'] for t in v.get('tests', []))}/{len(v.get('tests', []))}",
@@ -336,8 +359,11 @@ def session_start_context() -> str | None:
              "request), mention it in one or two sentences and offer to show it:"]
     for i in fresh:
         checks = f"tests {i['tests']}" + (f", judged checks {i['judged']}" if i["type"] == "skill" else "")
+        extra = (f"; it would replace the skill '{i['promotes']}' with code, so the job runs without reasoning "
+                 f"through it (muscle memory)" if i.get("promotes") else "") + \
+                ("; learned from a single session" if i.get("quick") else "")
         lines.append(f"- {i['type']} '{i['name']}': {i['description'][:160]} (seen {i['n_sessions']} times, "
-                     f"{i['n_success']} successful; {checks})")
+                     f"{i['n_success']} successful; {checks}{extra})")
     d = fresh[0]["draft"]
     lines += [f"To show it: {py} {cli} review {d}",
               f"Only if the user explicitly says yes, install it: {py} {cli} approve {d} --yes --note \"approved in chat\"",

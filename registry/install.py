@@ -271,6 +271,10 @@ def install(proposal: dict, files: dict[str, str], *, draft_dir: Path, note: str
     }
     if proposal.get("wraps"):
         entry["wraps"] = proposal["wraps"]["script"]
+    if proposal.get("promotes"):
+        entry["promoted_from"] = proposal["promotes"]  # the skill this replaced (for `refine.py demote`)
+    if proposal.get("quick"):
+        entry["quick"] = True
     if kind == "script":
         entry["shim"] = write_shim(entry).relative_to(install_root()).as_posix()
     reg["installed"][name] = entry
@@ -282,6 +286,8 @@ def install(proposal: dict, files: dict[str, str], *, draft_dir: Path, note: str
         pattern["status"] = "installed"
         pattern["installed"] = {"name": name, "version": entry["version"], "at": entry["approved_at"]}
         pattern.pop("pending_revision" if kind != "tool" or not proposal.get("wraps") else "pending_exposure", None)
+        if proposal.get("promotes"):
+            pattern.pop("pending_promotion", None)
         store.save_pattern(pattern)
     meta = store.read_json(draft_dir / "proposal.json")
     meta["status"] = "installed"
@@ -344,7 +350,8 @@ def uninstall(name: str, *, reason: str | None = None, use_git: bool = True, for
                            "note": reason})
     _save_registry(reg)
     pattern = store.load_pattern(entry["pattern_key"])
-    if pattern:
+    still_installed = [e["name"] for e in reg["installed"].values() if e["pattern_key"] == entry["pattern_key"]]
+    if pattern and not still_installed:  # another item (e.g. the tool a skill was promoted to) keeps it alive
         pattern["status"] = "retired"
         pattern["retired"] = {"at": store.now(), "reason": reason}
         store.save_pattern(pattern)

@@ -66,6 +66,9 @@ def do_cluster(a):
     else:
         clusters = cl.group_by_family(summaries)
         print(f"clustered {len(summaries)} summaries by task_family")
+    if a.min_success is None:
+        from refine import auto
+        a.min_success = int(auto.config()["min_success"])
     rows = cl.apply_clusters(clusters, summaries, method=a.method, min_success=a.min_success,
                              success_outcomes=success)
     _print_patterns(rows)
@@ -130,7 +133,8 @@ def main(argv=None):
 
     def clus_opts(p):
         p.add_argument("--method", choices=("claude", "family"), default="claude")
-        p.add_argument("--min-success", type=int, default=3)
+        p.add_argument("--min-success", type=int, default=None,
+                       help="successful sessions before a task is learned (default: auto.min_success, 3)")
         p.add_argument("--success", default="accepted,edited", help="outcomes counted as success")
 
     for name, fns in (("summarize", [summ_opts]), ("cluster", [clus_opts]), ("run", [summ_opts, clus_opts])):

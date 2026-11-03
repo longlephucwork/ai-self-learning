@@ -160,7 +160,9 @@ def session_haystack(sid: str) -> tuple[str, list]:
     return _WS.sub("", text), values
 
 
-def check_provenance(test: dict, members: set[str], cache: dict) -> list[str]:
+def check_provenance(test: dict, members: set[str], cache: dict, *, stdin_is_arguments: bool = False) -> list[str]:
+    """stdin_is_arguments: for tools, stdin is the JSON-encoded call arguments, not logged data, so it isn't
+    looked up in the logs (the input files and expected outputs still are)."""
     prov = test.get("provenance")
     if prov == "synthetic":
         return []
@@ -176,7 +178,7 @@ def check_provenance(test: dict, members: set[str], cache: dict) -> list[str]:
     for f in test.get("input_files", []):
         if _WS.sub("", f["content"]) not in hay:
             problems.append(f"input {f['path']} not found in session {sid[:8]} logs")
-    if test.get("stdin") and _WS.sub("", test["stdin"]) not in hay:
+    if test.get("stdin") and not stdin_is_arguments and _WS.sub("", test["stdin"]) not in hay:
         problems.append(f"stdin not found in session {sid[:8]} logs")
     if prov == "logged":
         outs = list(test.get("expected_files", []))
@@ -295,7 +297,7 @@ def validate_draft(proposal: dict, files: dict[str, str], pattern: dict, *, allo
     tests = proposal.get("tests", [])
     cache: dict = {}
     for t in tests:
-        probs = check_provenance(t, members, cache)
+        probs = check_provenance(t, members, cache, stdin_is_arguments=proposal["type"] == "tool")
         if proposal["type"] in ("script", "tool") and t.get("provenance") in ("logged", "derived_from_feedback") \
                 and not t.get("expected_files") and t.get("stdout_compare", "ignore") == "ignore" \
                 and t.get("expected_exit", 0) == 0:
@@ -351,6 +353,121 @@ def validate_draft(proposal: dict, files: dict[str, str], pattern: dict, *, allo
     return report
 
 
+# ---------------- the Claude skill standard (skill-creator's quick_validate.py) ----------------
+
+SKILL_KEYS = {"name", "description", "license", "allowed-tools", "metadata", "compatibility"}
+
+
+def _frontmatter(text: str):
+    m = re.match(r"^---\n(.*?)\n---", text, re.S)
+    if not m:
+        return None, "no YAML frontmatter at the top of SKILL.md (it must start with ---)"
+    try:
+        import yaml  # same parser as skill-creator, when available
+        fm = yaml.safe_load(m.group(1))
+    except ImportError:
+        fm = {}
+        for line in m.group(1).splitlines():
+            if line.strip() and not line.startswith((" ", "\t", "#")) and ":" in line:
+                k, v = line.split(":", 1)
+                fm[k.strip()] = v.strip().strip("\"'")
+    except Exception as e:
+        return None, f"invalid YAML in the frontmatter: {e}"
+    if not isinstance(fm, dict):
+        return None, "the frontmatter must be a YAML dictionary"
+    return fm, None
+
+
+def skill_standard_problems(files: dict[str, str], *, expected_name: str | None = None) -> list[str]:
+    """The rules of skill-creator's quick_validate.py, plus: the name must match the skill's folder."""
+    probs = []
+    md = [p for p in files if Path(p).name == "SKILL.md" and not set(Path(p).parts[:-1]) & {"__pycache__", "node_modules"}
+          and Path(p).parts[0] != "evals"]
+    if "SKILL.md" not in files:
+        return ["SKILL.md not found at the skill's top level"]
+    if len(md) > 1:
+        probs.append(f"a skill must contain exactly one SKILL.md; extra: {', '.join(sorted(p for p in md if p != 'SKILL.md'))}")
+    fm, err = _frontmatter(files["SKILL.md"])
+    if err:
+        return probs + [err]
+    extra = set(fm) - SKILL_KEYS
+    if extra:
+        probs.append(f"unexpected frontmatter key(s): {', '.join(sorted(extra))} (allowed: {', '.join(sorted(SKILL_KEYS))})")
+    for key in ("name", "description"):
+        if key not in fm:
+            probs.append(f"frontmatter is missing '{key}'")
+    name, desc = fm.get("name", ""), fm.get("description", "")
+    if not isinstance(name, str):
+        probs.append("name must be a string")
+    elif name.strip():
+        n = name.strip()
+        if not re.match(r"^[a-z0-9-]+$", n):
+            probs.append(f"name {n!r} must be kebab-case (lowercase letters, digits and hyphens)")
+        if n.startswith("-") or n.endswith("-") or "--" in n:
+            probs.append(f"name {n!r} can't start or end with a hyphen or contain '--'")
+        if len(n) > 64:
+            probs.append(f"name is {len(n)} characters; the maximum is 64")
+        if expected_name and n != expected_name:
+            probs.append(f"name {n!r} must match the skill's folder name {expected_name!r}")
+    if not isinstance(desc, str):
+        probs.append("description must be a string")
+    elif desc.strip():
+        if "<" in desc or ">" in desc:
+            probs.append("description can't contain angle brackets (< or >)")
+        if len(desc.strip()) > 1024:
+            probs.append(f"description is {len(desc.strip())} characters; the maximum is 1024")
+    elif "description" in fm:
+        probs.append("description is empty")
+    comp = fm.get("compatibility")
+    if comp and (not isinstance(comp, str) or len(comp) > 500):
+        probs.append("compatibility must be a string of at most 500 characters")
+    body_lines = len(files["SKILL.md"].splitlines())
+    if body_lines > 500:
+        probs.append(f"SKILL.md has {body_lines} lines; keep it under 500 and move detail into references/")
+    return probs
+
+
+def find_skill_creator() -> Path | None:
+    """skill-creator's folder, if installed (Claude Code user skills, or synced Anthropic skills)."""
+    import glob
+    home = Path.home() / ".claude" / "skills"
+    for pat in ("skill-creator", "*/skill-creator", "*/*/skill-creator"):
+        for d in glob.glob(str(home / pat)):
+            if (Path(d) / "scripts" / "quick_validate.py").is_file():
+                return Path(d)
+    return None
+
+
+def official_skill_check(files: dict[str, str]) -> dict:
+    """Run skill-creator's own quick_validate.py on the draft, when skill-creator and PyYAML are available."""
+    sc = find_skill_creator()
+    if sc is None:
+        return {"ran": False, "message": "skill-creator not installed; the same rules were checked by the harness"}
+    try:
+        import yaml  # noqa: F401  (quick_validate.py needs it)
+    except ImportError:
+        return {"ran": False, "message": "PyYAML missing; the same rules were checked by the harness"}
+    box = Path(tempfile.mkdtemp(prefix="lh-skillcheck-"))
+    try:
+        name = "skill"
+        fm, _ = _frontmatter(files.get("SKILL.md", ""))
+        if fm and isinstance(fm.get("name"), str) and re.match(r"^[a-z0-9-]{1,64}$", fm["name"].strip()):
+            name = fm["name"].strip()
+        root = box / name
+        for p, c in files.items():
+            dst = root / safe_rel(p)
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            dst.write_text(c, encoding="utf-8")
+        r = subprocess.run([sys.executable, str(sc / "scripts" / "quick_validate.py"), str(root)],
+                           capture_output=True, text=True, timeout=60)
+        return {"ran": True, "valid": r.returncode == 0, "message": (r.stdout or r.stderr).strip()[:300],
+                "script": str(sc / "scripts" / "quick_validate.py")}
+    except (OSError, subprocess.TimeoutExpired) as e:
+        return {"ran": False, "message": f"couldn't run skill-creator's checker: {e}"}
+    finally:
+        shutil.rmtree(box, ignore_errors=True)
+
+
 def skill_script_for(test: dict, files: dict[str, str]) -> str | None:
     """Which bundled script a skill test runs: its `script` field, or the only .py file."""
     if test.get("script"):
@@ -368,13 +485,10 @@ def validate_skill(proposal: dict, files: dict[str, str], pattern: dict, *, allo
            "coverage": {}, "judged": [], "passed": False, "problems": []}
     P = rep["problems"]
     skill = files.get("SKILL.md", "")
-    m = re.match(r"^---\n(.*?)\n---\n", skill, re.S)
-    if not m:
-        P.append("SKILL.md missing YAML frontmatter")
-    else:
-        for key in ("name", "description"):
-            if not re.search(rf"^{key}:\s*\S", m.group(1), re.M):
-                P.append(f"SKILL.md frontmatter missing {key}")
+    P += skill_standard_problems(files, expected_name=proposal.get("name"))
+    rep["official_check"] = official_skill_check(files)
+    if rep["official_check"]["ran"] and not rep["official_check"]["valid"]:
+        P.append(f"skill-creator's quick_validate.py: {rep['official_check']['message']}")
     for ref in set(re.findall(r"(?<![\w.-])(scripts/[\w./-]+\.\w+)", skill)):
         if ref not in files:
             P.append(f"SKILL.md references missing file {ref}")

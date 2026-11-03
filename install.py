@@ -363,6 +363,69 @@ def path_installed() -> bool:
     return rc.exists() and MARK_BEGIN in rc.read_text(encoding="utf-8")
 
 
+# ---------------- built-in "learn this" skill ----------------
+
+BUILTIN_MARK = ".learning-harness-builtin"
+
+
+def builtin_skill_dir() -> Path:
+    return Path.home() / ".claude" / "skills" / "learning-harness"
+
+
+def builtin_skill_text() -> str:
+    py, repo = python_exe(), REPO.as_posix()
+    return f"""---
+name: learning-harness
+description: Use the user's local learning harness. Use when the user says "learn this", "remember how to do this", "make this a skill/script/tool", "turn this into muscle memory", or asks what the harness has learned, drafted or is waiting on.
+---
+
+# Learning harness
+
+The harness turns the user's repeated work into skills, scripts and tools, and only installs them with
+their approval. All commands below are safe to run; none installs anything except `approve`.
+
+## "Learn this" (quick learn from this session)
+
+1. Run: `{py} {repo}/refine/refine.py learn`
+   It learns from the current session (Claude Code's session id), drafts a skill, script or tool, and
+   validates it. It takes a minute and costs a few cents.
+2. Tell the user in one or two sentences what was drafted (type and name), then offer to show it:
+   `{py} {repo}/review/cli.py review <name>`
+3. Only if the user explicitly says yes, install it:
+   `{py} {repo}/review/cli.py approve <name> --yes --note "approved in chat"`
+   Never approve without their explicit yes.
+
+If `learn` says the session was rated `redone`, or that it's already learned, tell the user and stop.
+
+## Other questions
+
+- What's waiting for approval: `{py} {repo}/review/cli.py proposals`
+- What has been learned, and how practised it is: `{py} {repo}/refine/refine.py report`
+- Turn a well-practised skill into a tool (muscle memory): `{py} {repo}/refine/refine.py promote <skill>`
+- Automatic learning status and budget: `{py} {repo}/refine/refine.py auto-status`
+"""
+
+
+def builtin_skill_installed() -> bool:
+    return (builtin_skill_dir() / BUILTIN_MARK).exists()
+
+
+def setup_builtin_skill(uninstall: bool = False) -> None:
+    d = builtin_skill_dir()
+    if uninstall:
+        if builtin_skill_installed():
+            shutil.rmtree(d)
+            ok(f"removed the 'learn this' skill ({d})")
+        return
+    if d.exists() and not builtin_skill_installed():
+        warn(f"{d} exists and isn't ours; left it alone")
+        return
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "SKILL.md").write_text(builtin_skill_text(), encoding="utf-8")
+    (d / BUILTIN_MARK).write_text("written by learning-harness install.py\n", encoding="utf-8")
+    ok(f"'learn this' skill in {d}: say \"learn this\" in any session to learn from it")
+
+
 # ---------------- updates ----------------
 
 def _upd():
@@ -491,6 +554,7 @@ def main(argv=None) -> int:
     ap.add_argument("--check-update", action="store_true", help="look for a newer release; change nothing")
     ap.add_argument("--no-update-check", action="store_true", help="don't check for new releases daily")
     ap.add_argument("--no-auto", action="store_true", help="don't enable automatic learning")
+    ap.add_argument("--no-learn-skill", action="store_true", help="don't add the 'learn this' skill for Claude")
     ap.add_argument("--budget", type=float, default=None, help="monthly budget for automatic learning (USD, default 5)")
     ap.add_argument("--allow-unsandboxed", action="store_true",
                     help="allow generated code/tools to run without network isolation (systems with no sandbox)")
@@ -508,6 +572,8 @@ def main(argv=None) -> int:
         (ok if mcp_installed() else warn)(f"MCP server `learned` {'registered' if mcp_installed() else 'not registered'}")
         (ok if path_installed() else warn)(f"bin/ {'on' if path_installed() else 'not on'} PATH")
         auto_status()
+        (ok if builtin_skill_installed() else warn)(
+            f"'learn this' skill {'installed' if builtin_skill_installed() else 'not installed'}")
         update_status()
         return 0
 
@@ -519,6 +585,8 @@ def main(argv=None) -> int:
             setup_mcp(uninstall=True)
         if not a.no_auto and auto_enabled() and ui.ask("Turn off automatic learning?"):
             setup_auto(enable=False)
+        if builtin_skill_installed() and ui.ask("Remove the 'learn this' skill?"):
+            setup_builtin_skill(uninstall=True)
         if update_cfg().get("check") and ui.ask("Stop checking for new releases?"):
             _upd().set_config(check=False)
             ok("daily update check off")
@@ -560,7 +628,12 @@ def main(argv=None) -> int:
         setup_auto(enable=True, budget=budget)
     else:
         setup_auto(enable=False)
-    say("\n7. updates")
+    say("\n7. 'learn this'")
+    if a.no_learn_skill:
+        say("  skipped (--no-learn-skill)")
+    elif ui.ask("Add a skill so you can say \"learn this\" in a session to learn from it right away?"):
+        setup_builtin_skill()
+    say("\n8. updates")
     if a.no_update_check:
         say("  skipped (--no-update-check)")
         _upd().set_config(check=False)
@@ -569,7 +642,7 @@ def main(argv=None) -> int:
         ok("daily update check on: Claude will tell you when a new release is out")
     else:
         _upd().set_config(check=False)
-    say("\n8. PATH")
+    say("\n9. PATH")
     if a.no_path:
         say("  skipped (--no-path)")
     elif ui.ask("Add bin/ (wrappers for installed scripts) to your PATH?"):

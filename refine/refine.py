@@ -6,6 +6,9 @@
   refine.py report [--stale-days 60] [--min-failures 2] [--fail-rate 0.3]
   refine.py revise <name> [--model M]          draft v(N+1) from the failures (normal review/approve applies)
   refine.py expose <script> [--model M]        draft an MCP tool that wraps an installed script (no new code)
+  refine.py learn [session]                    quick learn: draft from ONE session now (default: this/last session)
+  refine.py promote <skill>                    turn a well-practised skill into a tool (muscle memory)
+  refine.py demote <tool>                      bring back the skill a promoted tool replaced
   refine.py auto [--force]                     one automatic-learning run (normally started by the SessionEnd hook)
   refine.py auto-status                        settings, budget, last run, drafts waiting
   refine.py cycle [--generate N] [--no-detect] one maintenance pass: detect -> draft new candidates -> report
@@ -173,11 +176,24 @@ def reconsider_rejected() -> list[dict]:
 
 
 def build_report(*, stale_days=60, min_failures=2, fail_rate=0.3, now=None) -> dict:
+    from refine import memory
     now = now or datetime.now(timezone.utc)
     items = []
     for entry in reg.load_registry()["installed"].values():
         st = stats(entry)
         rec = recommend(st, now=now, stale_days=stale_days, min_failures=min_failures, fail_rate=fail_rate)
+        if entry["type"] == "skill":
+            state, why = memory.promotion_status(entry, uses=st["uses_detail"])
+            if state == "ready" and rec["action"] in ("keep", "missed"):
+                rec["action"] = "promote"
+            rec["reasons"].append(why)
+            st["level"] = "thinking"
+        else:
+            st["level"] = "automatic" if entry["type"] in ("tool", "script") else entry["type"]
+        if entry.get("promoted_from") and rec["action"] == "revise":
+            rec["action"] = "demote"
+            rec["reasons"].append(f"it replaced the skill {entry['promoted_from']['skill']}; "
+                                  f"demoting brings that skill back")
         items.append({**{k: v for k, v in st.items() if k != "uses_detail"}, **rec})
     rep = {"generated_at": store.now(), "thresholds": {"stale_days": stale_days, "min_failures": min_failures,
                                                        "fail_rate": fail_rate},
@@ -193,6 +209,8 @@ def print_report(rep: dict) -> None:
         for r in it["reasons"]:
             print(f"{'':12}- {r}")
         nxt = {"revise": f"python3 refine/refine.py revise {it['name']}",
+               "promote": f"python3 refine/refine.py promote {it['name']}",
+               "demote": f"python3 refine/refine.py demote {it['name']}",
                "retire": f"python3 registry/install.py uninstall {it['name']} --reason 'unused'"}.get(it["action"])
         if nxt:
             print(f"{'':12}next: {nxt}")
@@ -242,6 +260,10 @@ def main(argv=None):
     p.add_argument("--max-attempts", type=int, default=2)
     p = sub.add_parser("expose"); p.add_argument("name"); p.add_argument("--model")
     p.add_argument("--max-attempts", type=int, default=2)
+    p = sub.add_parser("learn"); p.add_argument("session", nargs="?", help="session id or prefix (default: this one)")
+    p.add_argument("--model")
+    p = sub.add_parser("promote"); p.add_argument("name"); p.add_argument("--model")
+    p = sub.add_parser("demote"); p.add_argument("name"); p.add_argument("--yes", action="store_true")
     p = sub.add_parser("auto"); p.add_argument("--force", action="store_true", help="ignore the throttle")
     sub.add_parser("auto-status")
     a = ap.parse_args(argv)
@@ -293,6 +315,46 @@ def main(argv=None):
             name = Path(r["draft"]).name
             print(f"review: python3 review/cli.py diff {name}  then  python3 review/cli.py approve {name}")
         return 0 if r["passed"] else 1
+    elif a.cmd == "learn":
+        from harness_lib.claude_cli import ClaudeError
+        from refine.learn import LearnError, learn
+        try:
+            r = learn(a.session, model=a.model)
+        except (LearnError, LookupError, ValueError, ClaudeError) as e:
+            sys.exit(f"error: {e}")
+        name = Path(r["draft"]).name if r.get("draft") else None
+        print(f"\n{'VALIDATED' if r['passed'] else 'NOT VALIDATED'}: {r.get('draft') or '(no draft)'}  (${r['cost_usd']:.3f})")
+        if r["passed"]:
+            print(f"review: python3 review/cli.py review {name}   approve: python3 review/cli.py approve {name}")
+        else:
+            for p in r["problems"][:8]:
+                print("  -", p)
+        return 0 if r["passed"] else 1
+    elif a.cmd == "promote":
+        from harness_lib.claude_cli import ClaudeError
+        from refine import memory
+        try:
+            r = memory.promote(a.name, model=a.model)
+        except (LookupError, ValueError, ClaudeError) as e:
+            sys.exit(f"error: {e}")
+        name = Path(r["draft"]).name if r.get("draft") else None
+        print(f"\n{'VALIDATED' if r['passed'] else 'NOT VALIDATED'}: {r.get('draft')}  (${r['cost_usd']:.3f})")
+        if r["passed"]:
+            print(f"review: python3 review/cli.py review {name}   approve (retires the skill): "
+                  f"python3 review/cli.py approve {name}")
+        return 0 if r["passed"] else 1
+    elif a.cmd == "demote":
+        from refine import memory
+        if not a.yes and not (sys.stdin.isatty() and input(f"Bring back the skill and remove {a.name}? [y/N] ")
+                              .strip().lower() in ("y", "yes")):
+            print("cancelled")
+            return 1
+        try:
+            r = memory.demote(a.name)
+        except LookupError as e:
+            sys.exit(f"error: {e}")
+        print(f"restored skill {r['skill']} (v{r['skill_version']}) and removed tool {r['removed_tool']}")
+        return 0
     elif a.cmd == "auto":
         from refine import auto
         r = auto.run(force=a.force)

@@ -27,6 +27,10 @@ Use Claude Code as usual. In the background, the harness:
 
 At most once a day, within $5/month. When a draft is ready, Claude mentions it at the start of your next session. Say yes to see it, then yes again to install it.
 
+**Learn right away:** say **"learn this"** in any session. Claude drafts a skill, script or tool from that one session, and asks before installing it.
+
+**Muscle memory:** a skill you use often and accurately, for a task that's mechanical, gets proposed as a tool. Claude then just calls it instead of reasoning through the task each time. If the tool starts failing, `refine.py demote` brings the skill back. Tasks that need judgment stay skills.
+
 You can also do it all by hand. Run these from `~/claude-learning-harness` (on Windows, use `python` instead of `python3`):
 
 | Command | What it does |
@@ -36,6 +40,8 @@ You can also do it all by hand. Run these from `~/claude-learning-harness` (on W
 | `python3 review/cli.py approve <name>` | install it |
 | `python3 review/cli.py reject <name> --reason "..."` | drop it; that task won't be proposed again |
 | `python3 review/cli.py rate last accepted` | rate your last session yourself (`accepted`, `edited` or `redone`); this overrides the automatic rating |
+| `python3 refine/refine.py learn` | learn from your last session now (what "learn this" runs) |
+| `python3 refine/refine.py report` | what's learned: uses, accuracy, and what's ready to become automatic |
 | `python3 refine/refine.py auto-status` | automatic learning on/off, this month's spend, what's waiting |
 | `python3 registry/install.py list` | what's installed |
 | `python3 registry/install.py uninstall <name>` | remove an installed item |

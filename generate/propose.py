@@ -118,6 +118,17 @@ is the actual output.
 - When the evidence is inconsistent (some sessions kept numbers as strings), follow the accepted \
 sessions and the user's feedback, and say so in the spec.
 
+SKILL FORMAT (the Claude skill standard, as checked by skill-creator's quick_validate.py):
+- SKILL.md starts with YAML frontmatter containing `name` and `description` (optional: license, \
+allowed-tools, metadata, compatibility; nothing else).
+- name: the artifact's name, kebab-case (lowercase letters, digits, hyphens), at most 64 characters.
+- description: at most 1024 characters, no angle brackets. It is how Claude decides to use the skill, \
+so say what it does AND when to use it, with the phrases a user would actually say. Be a little \
+"pushy": Claude tends to under-use skills.
+- Body: under 500 lines, imperative instructions. Explain WHY each rule matters instead of shouting \
+MUST/NEVER; the model applying the skill is smart and generalises from reasons, not from examples.
+- Put deterministic or repeated work in scripts/ and long reference material in references/.
+
 SKILL TESTS: a skill's evidence comes from a separate judged check of SKILL.md against every accepted \
 session, so do NOT write tests for the skill itself. Write tests only for its bundled scripts: set \
 "script" to the script's path (e.g. "scripts/classify.py"). A bundled script's output is usually \
@@ -254,18 +265,32 @@ def apply_revision_rules(prop: dict, revision: dict) -> None:
 
 
 def propose(key: str, *, model: str | None = None, max_attempts: int = 2, force: bool = False,
-            allow_no_netns: bool = False, revision: dict | None = None, log=print) -> dict:
+            allow_no_netns: bool = False, revision: dict | None = None, force_type: str | None = None,
+            promotes: dict | None = None, quick: bool = False, log=print) -> dict:
+    """Draft and validate an artifact for pattern `key`.
+
+    force_type: the draft must be this type (promotion asks for a "tool").
+    promotes:   the installed skill entry this draft would replace (thinking -> automatic).
+    quick:      the evidence is a single session (`refine.py learn`)."""
     pattern = store.load_pattern(key)
     if not pattern:
         raise LookupError(f"no pattern {key!r}")
-    if revision is not None:
+    if revision is not None or promotes is not None:
         if pattern["status"] != "installed":
-            raise ValueError(f"revision needs an installed pattern; {key!r} is {pattern['status']!r}")
+            raise ValueError(f"needs an installed pattern; {key!r} is {pattern['status']!r}")
     elif pattern["status"] != "candidate" and not force:
         raise ValueError(f"pattern {key!r} has status {pattern['status']!r}; only candidates are proposed "
                          f"(use --force to override)")
     if pattern["status"] in ("rejected", "retired") and force:
         log(f"warning: pattern was {pattern['status']}; proposing anyway because of --force")
+    if force_type:
+        pattern = {**pattern, "suggested_type": force_type,
+                   "type_rationale": (f"PROMOTION: the installed skill '{promotes['name']}' has been used often and "
+                                      f"accurately on mechanical inputs, so its job must now run as deterministic code "
+                                      f"that Claude calls without reasoning through the task. Produce a {force_type}; "
+                                      f"base its tests on the sessions where the skill was used. Current skill:\n"
+                                      f"{promotes.get('skill_md', '')[:6000]}") if promotes else
+                                     f"The draft must be a {force_type}."}
     evidence = build_evidence(pattern)
     evidence_sessions = [s for s in pattern["session_ids"] if s not in pattern.get("excluded_injection", [])]
     previous = failures = None
@@ -288,6 +313,13 @@ def propose(key: str, *, model: str | None = None, max_attempts: int = 2, force:
             if revision is not None:
                 apply_revision_rules(prop, revision)
             errs = check_structure(prop, pattern)
+            if force_type and prop["type"] != force_type:
+                errs.append(f"the draft must be a {force_type}, not a {prop['type']}")
+            if promotes is not None:
+                from registry import install as _reg
+                taken = _reg.load_registry()["installed"]
+                if prop["name"] in taken and taken[prop["name"]]["type"] != prop["type"]:
+                    prop["name"] = f"{prop['name']}-auto"[:60]
         if errs:
             files, flags = {}, []
             rep = {"passed": False, "problems": errs, "tests": [], "provenance": [], "coverage": {}}
@@ -331,11 +363,18 @@ def propose(key: str, *, model: str | None = None, max_attempts: int = 2, force:
     if revision is not None:
         meta["revision_of"] = {"name": revision["name"], "version": revision["version"],
                                "failures": len(revision["failures"])}
+    if promotes is not None:
+        meta["promotes"] = {"skill": promotes["name"], "version": promotes["version"]}
+    if quick:
+        meta["quick"] = True
     store.write_json_atomic(d / "proposal.json", meta)
 
     rel = d.relative_to(store.REPO_ROOT).as_posix() if d.is_relative_to(store.REPO_ROOT) else str(d)
     pattern["last_proposal"] = {"draft": rel, "at": store.now(), "passed": rep["passed"]}
-    if rep["passed"] and revision is None:
+    pattern = {**store.load_pattern(key), "last_proposal": pattern["last_proposal"]}  # drop forced-type overrides
+    if rep["passed"] and promotes is not None:
+        pattern["pending_promotion"] = rel   # stays 'installed' until the promotion is approved
+    elif rep["passed"] and revision is None:
         pattern["status"] = "proposed"
         pattern["proposal"] = rel
     elif rep["passed"]:
