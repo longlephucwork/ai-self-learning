@@ -42,9 +42,11 @@ def cmd_list(args):
     if not recs:
         print("no sessions stored yet")
         return
+    print("(~ = rating inferred automatically; rate it yourself to override)")
     print(f"{'session':10} {'last activity':20} {'req':>3} {'tools':>5} {'outcome':9} {'ended':10} first request")
     for r in recs:
-        o = store.outcome(r["session_id"])["outcome"]
+        oc = store.outcome(r["session_id"])
+        o = oc["outcome"] + ("~" if oc.get("source") == "inferred" else "")
         print(f"{r['session_id'][:8]:10} {(r['last_activity_at'] or '')[:19]:20} {r['n_requests']:>3} "
               f"{r['n_tool_calls']:>5} {o:9} {(r['end_reason'] or '-'):10} {_one_line(r['first_request'], 60)}")
 
@@ -171,6 +173,13 @@ def cmd_review(args):
         st = "PASS" if r and r["passed"] else ("FAIL" if r else "----")
         print(f"  {st}  {t['name'][:28]:28} {t['provenance']:22} from {t['source_session'][:8]}  "
               f"{t['rationale'][:50]}")
+    if v.get("judged"):
+        print("\n== judged checks (a model compared the skill with each accepted session; judgment, not execution)")
+        for j in v["judged"]:
+            print(f"  {j['verdict'].upper():5} session {j['session_id'][:8]} ({store.outcome(j['session_id'])['outcome']})"
+                  f": {j['reason'][:200]}")
+            for c in j.get("checks", [])[:8]:
+                print(f"         {'ok ' if c['consistent'] else 'NO '} {c['rule'][:90]}")
     c = v.get("coverage", {})
     fp_now = replay.fingerprint(files, proposal["tests"])
     changed = v.get("fingerprint") != fp_now
@@ -206,7 +215,7 @@ def cmd_diff(args):
 def cmd_revalidate(args):
     proposal, files, d = _draft(args.draft)
     pattern = store.load_pattern(proposal["pattern_key"])
-    rep = replay.validate_draft(proposal, files, pattern)
+    rep = replay.validate_draft(proposal, files, pattern, previous=store.read_json(d / "validation.json"))
     for f in blocking(scan_files(files)):
         rep["problems"].append(f"safety scan: {f['kind']} in {f['file']}:{f['line']} ({f['detail']})")
     rep["passed"] = not rep["problems"]
@@ -229,7 +238,7 @@ def cmd_approve(args):
         raise LookupError(f"pattern is {pattern['status']!r}; not approving")
 
     print("re-validating the draft as it is on disk now ...")
-    rep = replay.validate_draft(proposal, files, pattern)
+    rep = replay.validate_draft(proposal, files, pattern, previous=store.read_json(d / "validation.json"))
     bl = blocking(scan_files(files))
     for f in bl:
         rep["problems"].append(f"safety scan: {f['kind']} in {f['file']}:{f['line']} ({f['detail']})")

@@ -98,6 +98,8 @@ def hook_main() -> int:
         _log_error(f"bad hook payload: {raw[:200]!r}")
         return 0
     event = payload.get("hook_event_name")
+    if event == "SessionStart":
+        return session_start()
     if event == "Stop" and payload.get("stop_hook_active"):
         return 0  # we're inside a stop-hook continuation loop; nothing new to log
     tp = payload.get("transcript_path")
@@ -112,7 +114,33 @@ def hook_main() -> int:
            end_reason=payload.get("reason") if event == "SessionEnd" else None,
            session_id=payload.get("session_id"),
            last_assistant_message=payload.get("last_assistant_message"))
+    if event == "SessionEnd":
+        maybe_start_auto()
     return 0
+
+
+def session_start() -> int:
+    """Tell Claude about validated drafts waiting for the user (local file reads only; no model call)."""
+    try:
+        from refine import auto
+        text = auto.session_start_context()
+    except Exception:
+        _log_error(traceback.format_exc().replace("\n", " | "))
+        return 0
+    if text:
+        print(json.dumps({"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": text}}))
+    return 0
+
+
+def maybe_start_auto() -> None:
+    """Start a detached automatic-learning run if the throttle allows; never delays the session."""
+    try:
+        from refine import auto
+        ok, _ = auto.should_run()
+        if ok:
+            auto.spawn_in_background()
+    except Exception:
+        _log_error(traceback.format_exc().replace("\n", " | "))
 
 
 def main() -> int:

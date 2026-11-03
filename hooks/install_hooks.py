@@ -44,7 +44,7 @@ def main():
     path.parent.mkdir(parents=True, exist_ok=True)
     settings = json.loads(path.read_text()) if path.exists() and path.read_text().strip() else {}
     hooks = settings.setdefault("hooks", {})
-    for event in ("Stop", "SessionEnd"):
+    for event in ("SessionStart", "Stop", "SessionEnd"):
         groups = hooks.get(event, [])
         # drop any previous copy of our handler
         for g in groups:

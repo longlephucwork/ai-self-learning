@@ -102,6 +102,25 @@ class Installer(unittest.TestCase):
         self.assertNotIn(install.MARK_BEGIN, (Path(os.environ["HOME"]) / ".zshrc").read_text())
         self.assertEqual(self.calls()[-1][:3], ["mcp", "remove", "learned"])
 
+    def test_automatic_learning_step(self):
+        from refine import auto
+        rc, out = self.run_main("--yes", "--skip-tests", "--no-mcp", "--no-path")
+        self.assertEqual(rc, 0, out)
+        cfg = auto.config()
+        self.assertEqual((cfg["enabled"], cfg["monthly_budget_usd"]), (True, 5.0))
+        self.assertIn("automatic learning on", out)
+        settings = json.loads((Path(os.environ["HOME"]) / ".claude" / "settings.json").read_text())
+        self.assertEqual(sorted(settings["hooks"]), ["SessionEnd", "SessionStart", "Stop"])
+        rc, out = self.run_main("--yes", "--skip-tests", "--no-mcp", "--no-path", "--budget", "2.5")
+        self.assertEqual(auto.config()["monthly_budget_usd"], 2.5)
+        rc, out = self.run_main("--check")
+        self.assertIn("automatic learning on; $0.00 of $2.50", out)
+        rc, out = self.run_main("--yes", "--skip-tests", "--no-mcp", "--no-path", "--no-auto")
+        self.assertTrue(auto.config()["enabled"])                  # --no-auto skips the step; doesn't flip it
+        rc, out = self.run_main("--uninstall", "--yes")
+        self.assertFalse(auto.config()["enabled"])
+        self.assertIn("automatic learning off", out)
+
     def test_opt_outs(self):
         rc, out = self.run_main("--yes", "--skip-tests", "--no-hooks", "--no-mcp", "--no-path")
         self.assertEqual(rc, 0)

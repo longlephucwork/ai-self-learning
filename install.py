@@ -354,6 +354,44 @@ def path_installed() -> bool:
     return rc.exists() and MARK_BEGIN in rc.read_text(encoding="utf-8")
 
 
+# ---------------- automatic learning ----------------
+
+def auto_config() -> dict:
+    sys.path.insert(0, str(REPO))
+    from refine import auto
+    return auto.config()
+
+
+def auto_enabled() -> bool:
+    return bool(auto_config().get("enabled"))
+
+
+def setup_auto(enable: bool, budget: float | None = None) -> None:
+    sys.path.insert(0, str(REPO))
+    from refine import auto
+    values = {"enabled": enable}
+    if budget is not None:
+        values["monthly_budget_usd"] = float(budget)
+    cfg = auto.set_config(**values)
+    if enable:
+        ok(f"automatic learning on: drafts only, budget ${cfg['monthly_budget_usd']:.2f}/month, at most every "
+           f"{cfg['min_hours_between_runs']}h after {cfg['min_new_sessions']}+ new sessions")
+    else:
+        ok("automatic learning off (run `python3 refine/refine.py cycle` yourself)")
+
+
+def auto_status() -> None:
+    sys.path.insert(0, str(REPO))
+    from refine import auto
+    from harness_lib.claude_cli import month_spend
+    cfg = auto.config()
+    (ok if cfg["enabled"] else warn)(f"automatic learning {'on' if cfg['enabled'] else 'off'}; "
+                                     f"${month_spend():.2f} of ${cfg['monthly_budget_usd']:.2f} spent this month")
+    n = len(auto.inbox())
+    if n:
+        ok(f"{n} draft(s) waiting for you: python3 review/cli.py proposals")
+
+
 # ---------------- main ----------------
 
 def main(argv=None) -> int:
@@ -365,6 +403,8 @@ def main(argv=None) -> int:
     ap.add_argument("--no-mcp", action="store_true")
     ap.add_argument("--no-path", action="store_true")
     ap.add_argument("--skip-tests", action="store_true")
+    ap.add_argument("--no-auto", action="store_true", help="don't enable automatic learning")
+    ap.add_argument("--budget", type=float, default=None, help="monthly budget for automatic learning (USD, default 5)")
     ap.add_argument("--allow-unsandboxed", action="store_true",
                     help="allow generated code/tools to run without network isolation (systems with no sandbox)")
     a = ap.parse_args(argv)
@@ -378,6 +418,7 @@ def main(argv=None) -> int:
         (ok if hooks_installed() else warn)(f"hooks {'installed' if hooks_installed() else 'not installed'}")
         (ok if mcp_installed() else warn)(f"MCP server `learned` {'registered' if mcp_installed() else 'not registered'}")
         (ok if path_installed() else warn)(f"bin/ {'on' if path_installed() else 'not on'} PATH")
+        auto_status()
         return 0
 
     if a.uninstall:
@@ -386,6 +427,8 @@ def main(argv=None) -> int:
             setup_hooks(uninstall=True)
         if not a.no_mcp and ui.ask("Unregister the MCP server `learned`?"):
             setup_mcp(uninstall=True)
+        if not a.no_auto and auto_enabled() and ui.ask("Turn off automatic learning?"):
+            setup_auto(enable=False)
         if not a.no_path and ui.ask("Remove bin/ from PATH?"):
             setup_path(uninstall=True)
         say(f"\ndone. To delete everything else: remove {REPO}")
@@ -412,7 +455,19 @@ def main(argv=None) -> int:
         say("  skipped (--no-mcp)")
     elif ui.ask("Register the `learned` MCP server for all projects? (claude mcp add --scope user)"):
         setup_mcp()
-    say("\n6. PATH")
+    say("\n6. automatic learning")
+    budget = a.budget if a.budget is not None else auto_config().get("monthly_budget_usd", 5.0)
+    if a.no_auto:
+        say("  skipped (--no-auto)")
+    elif a.no_hooks and not hooks_installed():
+        say("  skipped (needs the session-logging hooks)")
+    elif ui.ask(f"Learn automatically? After sessions end it rates them, finds repeated tasks and drafts\n"
+                f"  scripts/skills in the background: at most once a day, drafts only (you still approve),\n"
+                f"  budget ${budget:.2f}/month. Claude tells you when a draft is ready."):
+        setup_auto(enable=True, budget=budget)
+    else:
+        setup_auto(enable=False)
+    say("\n7. PATH")
     if a.no_path:
         say("  skipped (--no-path)")
     elif ui.ask("Add bin/ (wrappers for installed scripts) to your PATH?"):

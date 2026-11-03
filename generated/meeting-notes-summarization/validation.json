@@ -1,0 +1,117 @@
+{
+  "validated_at": "2026-11-03T09:09:16+00:00",
+  "network_isolated": true,
+  "tests": [],
+  "provenance": [],
+  "coverage": {
+    "successful_sessions": 3,
+    "covered": 3,
+    "required": 3,
+    "method": "judged"
+  },
+  "judged": [
+    {
+      "session_id": "404ed6db-e36c-477d-a00f-52dcbdb8d9bf",
+      "key": "cd130f06602b7ae5",
+      "verdict": "pass",
+      "checks": [
+        {
+          "rule": "Structure: title, Present line, context Updates, Decisions and Action items always present",
+          "consistent": true,
+          "evidence": "Accepted NOTES.md has '# Daily Standup — Tue 4 Nov', '**Present:**', '## Updates', '## Decisions', '## Action Items'."
+        },
+        {
+          "rule": "Action items as a table with Owner, Action, Due; '—' for unknown owner",
+          "consistent": true,
+          "evidence": "Accepted table '| Owner | Action | Due |' with '| — | Scope CSV export | Next sprint |'."
+        },
+        {
+          "rule": "Keep deadline wording, mark guesses (tentative)",
+          "consistent": true,
+          "evidence": "'probably by Thursday' became 'Thursday (tentative)'; the skill's optional date resolution (Thursday (6 Nov)) is a minor difference."
+        },
+        {
+          "rule": "Decisions include explicit decisions and 'decided NOT to'",
+          "consistent": true,
+          "evidence": "Feature flag decision and 'scope CSV next sprint, not now' are both listed under Decisions."
+        },
+        {
+          "rule": "Open questions section last, omit if truly none",
+          "consistent": true,
+          "evidence": "The transcript has no clear unresolved question (the blocker has an owner, Tom). The accepted output has no such section."
+        },
+        {
+          "rule": "Do not invent facts; reply in the length the user asks for (one line) with file name and counts",
+          "consistent": true,
+          "evidence": "The user asked for a one-line reply. The final message names NOTES.md and gives 2 decisions and 4 action items in one sentence."
+        }
+      ],
+      "reason": "The skill's rules match the accepted output: same structure, table-form action items with Owner/Action/Due, tentative marking, decisions including the 'not now' one, and a one-line reply. Open questions is correctly omitted when none exist. Differences, such as resolving Thursday to a calendar date, are minor.",
+      "cost_usd": 0.0279,
+      "cached": false
+    },
+    {
+      "session_id": "ceccc598-36a3-4791-bd64-5991fb0f3375",
+      "key": "e1c9fa0ba5a12d95",
+      "verdict": "pass",
+      "checks": [
+        {
+          "rule": "Action items always a markdown table with Owner and Due columns plus an action column",
+          "consistent": true,
+          "evidence": "The user's note asks for \"a table with Owner and Due columns\". The accepted file has `| Task | Owner | Due |`. The skill's `| Owner | Action | Due |` meets the request, and the user gave no column order."
+        },
+        {
+          "rule": "Open questions go in a separate section placed last",
+          "consistent": true,
+          "evidence": "The note says \"list open questions separately at the end\". The accepted NOTES.md ends with `## Open questions` and the SSO question with An following up."
+        },
+        {
+          "rule": "Decisions section includes \"decided NOT to\" items",
+          "consistent": true,
+          "evidence": "The accepted file has \"We will **not** rewrite the search service this quarter\", which matches the transcript's \"Decided NOT to rewrite\"."
+        },
+        {
+          "rule": "Resolve weekdays against the real calendar and keep the original phrase, e.g. `Friday (6 Nov)`",
+          "consistent": true,
+          "evidence": "3 Nov 2026 is a Tuesday, so Friday is 6 Nov. The accepted final output says `Friday (6 Nov)`, which fixes the earlier 7 Nov error. The skill's explicit weekday check would have avoided that error."
+        },
+        {
+          "rule": "Do not invent facts, owners or deadlines; use the transcript's owner and wording, and `—` when there is none",
+          "consistent": true,
+          "evidence": "Duc's \"This week\" and An's `—` due date match the accepted rows. The skill's `(tentative)` marker for guesses is compatible with the \"~2 weeks (17 Nov)\" row."
+        },
+        {
+          "rule": "Optional context sections such as Sprint goal; Attendees with roles",
+          "consistent": true,
+          "evidence": "The accepted file has `**Attendees:** An (PM), Quang, Hoa, Duc` and a `## Sprint goal` section, both allowed by the skill."
+        },
+        {
+          "rule": "Reply in the length the user asks for (one line), naming the file and key counts",
+          "consistent": true,
+          "evidence": "The user asked for a one-line reply. The skill supports that, and the final message is a single sentence naming NOTES.md."
+        }
+      ],
+      "reason": "Following the skill gives NOTES.md with an Owner/Due action table and Open questions as the last section. That is what the user asked for and accepted. The skill's weekday-checking rule also prevents the Friday 7 Nov error that was fixed in the session. Its example column order differs slightly from the accepted file, but the user didn't specify an order, so this is not a failure.",
+      "cost_usd": 0.03,
+      "cached": false
+    },
+    {
+      "session_id": "d24589af-398b-4bf3-b234-15aaf8bc02c6",
+      "key": "f05280c100f25609",
+      "verdict": "pass",
+      "reason": "The skill's structure and rules match the accepted NOTES.md and the one-line reply. Nothing in the skill contradicts what the user accepted.",
+      "checks": [
+        {
+          "rule": "Action items always a table with Owner, Action and Due columns",
+          "consistent": true,
+          "evidence": "Accepted output uses `| Owner | Action | Due |` with rows for Khoa, Nam and Vy."
+        }
+      ],
+      "cost_usd": 0.0185,
+      "cached": false
+    }
+  ],
+  "passed": true,
+  "problems": [],
+  "fingerprint": "cf0414807b8d0ccc"
+}

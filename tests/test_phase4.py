@@ -158,10 +158,7 @@ class Phase4(unittest.TestCase):
         skill = {"type": "skill", "type_deviation_reason": "", "name": "tidy-notes", "description": "Tidy notes",
                  "spec": "s", "entrypoint": "", "tool_input_schema_json": "",
                  "files": [{"path": "SKILL.md", "content": SKILL_MD}],
-                 "tests": [{"name": f"t{i}", "source_session": sid, "provenance": "derived_from_feedback" if sid == "s-kv" else "logged",
-                            "rationale": "", "args": [], "stdin": "", "input_files": [], "expected_exit": 0,
-                            "expected_stdout": "", "stdout_compare": "ignore", "expected_files": []}
-                           for i, sid in enumerate(sorted(SESSIONS))]}
+                 "tests": []}   # no bundled scripts -> no tests; evidence comes from the judged checks
         self.draft(skill, key="notes")
         rc, out = self.cli("approve", "tidy-notes", "--yes")
         self.assertEqual(rc, 0, out)

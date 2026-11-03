@@ -2,11 +2,11 @@
   "name": "release-notes-generation",
   "type": "skill",
   "pattern_key": "release-notes-generation",
-  "status": "failed_validation",
-  "description": "Draft user-facing RELEASE_NOTES.md from git history since the last tag, leaving out internal-only changes and putting security fixes first.",
-  "spec": "Skill: release-notes-generation. Workflow: (1) Claude runs `git tag` and `git log --oneline <last-tag>..HEAD`, saves the log lines to a file, and reads CHANGES/README/diffs for context. (2) It runs `python3 scripts/classify_commits.py commits.txt` to bucket each commit by conventional-commit prefix or leading keywords. Output is JSON with the keys security, features, improvements, fixes, docs, internal and other. Each item has hash, scope and message. Input order is kept, and no-prefix subjects such as \"Add ...\", \"Fix ...\", \"Speed up ...\" or \"Update CI image\" are handled. (3) Claude uses judgment for the prose. It rewrites messages in plain user language and decides the 'other' bucket and the docs bucket. It drops internal changes (refactor, chore, ci, test, deps, renames) unless users would notice them, for example a dependency upgrade that changes behaviour. It puts a Security section first, notes any user action needed (e.g. a new length limit), and writes RELEASE_NOTES.md with sections New features, Improvements, Bug fixes and optionally Documentation. Accepted sessions grouped by features and fixes. The user's edit note said: leave out dependency/CI/test changes unless users notice them, and put security fixes first. If commits only touch the changelog and not code, say so in the reply. Replies should be one line. The helper does not run git, because scripts may not spawn subprocesses. It only reads the file passed as an argument, or stdin when the argument is '-'. A missing file exits with code 2. The helper's JSON output is computed from the logged commit lists; it is not itself present in the logs.",
+  "status": "validated",
+  "description": "Write user-facing RELEASE_NOTES.md for the changes since the last git tag, grouped by security, features, improvements, fixes and docs, omitting internal-only changes.",
+  "spec": "Skill that drafts user-facing release notes since the latest git tag. Judgment (what users notice, wording, grouping) is in SKILL.md; a bundled script scripts/classify_commits.py deterministically pre-classifies `git log --oneline` lines (stdin or file) into JSON categories: security, feature, improvement, fix, docs, dependency, internal, unknown. Rules from accepted sessions and user feedback: omit refactor/chore/ci/test/rename/internal commits and dependency bumps unless users would notice them; put security fixes first; no invented version number.",
   "type_deviation_reason": "",
-  "entrypoint": "scripts/classify_commits.py",
+  "entrypoint": "SKILL.md",
   "file_list": [
     "SKILL.md",
     "scripts/classify_commits.py"
@@ -15,76 +15,71 @@
     {
       "name": "weather-cli commits",
       "source_session": "2d3c95ad-8f8a-4c2d-a45a-21a3152b6351",
-      "provenance": "derived_from_feedback",
-      "rationale": "Input is the real commit list from the accepted session; expected buckets are the helper's classification (internal refactor/chore excluded, docs separated), not present verbatim in logs.",
+      "provenance": "synthetic",
+      "rationale": "Commit list from session; output is intermediate data.",
       "args": [
-        "commits.txt"
+        "log.txt"
       ],
       "stdin": "",
       "input_files": [
         {
-          "path": "commits.txt",
+          "path": "log.txt",
           "content": "f4926fe refactor: split api client into its own module\n00161c6 feat: show a 3-day forecast with --days\ndc79f36 docs: explain the config file location\n4f18067 chore: bump pytest to 8.3\n29a15d5 fix: crash when the city name contains spaces\n1b50316 feat: add --units flag to switch between metric and imperial\n"
         }
       ],
       "expected_exit": 0,
-      "expected_stdout": "{\"security\":[],\"features\":[{\"hash\":\"00161c6\",\"scope\":\"\",\"message\":\"show a 3-day forecast with --days\"},{\"hash\":\"1b50316\",\"scope\":\"\",\"message\":\"add --units flag to switch between metric and imperial\"}],\"improvements\":[],\"fixes\":[{\"hash\":\"29a15d5\",\"scope\":\"\",\"message\":\"crash when the city name contains spaces\"}],\"docs\":[{\"hash\":\"dc79f36\",\"scope\":\"\",\"message\":\"explain the config file location\"}],\"internal\":[{\"hash\":\"f4926fe\",\"scope\":\"\",\"message\":\"split api client into its own module\"},{\"hash\":\"4f18067\",\"scope\":\"\",\"message\":\"bump pytest to 8.3\"}],\"other\":[]}",
+      "expected_stdout": "[{\"hash\":\"f4926fe\",\"subject\":\"refactor: split api client into its own module\",\"category\":\"internal\",\"message\":\"split api client into its own module\"},{\"hash\":\"00161c6\",\"subject\":\"feat: show a 3-day forecast with --days\",\"category\":\"feature\",\"message\":\"show a 3-day forecast with --days\"},{\"hash\":\"dc79f36\",\"subject\":\"docs: explain the config file location\",\"category\":\"docs\",\"message\":\"explain the config file location\"},{\"hash\":\"4f18067\",\"subject\":\"chore: bump pytest to 8.3\",\"category\":\"internal\",\"message\":\"bump pytest to 8.3\"},{\"hash\":\"29a15d5\",\"subject\":\"fix: crash when the city name contains spaces\",\"category\":\"fix\",\"message\":\"crash when the city name contains spaces\"},{\"hash\":\"1b50316\",\"subject\":\"feat: add --units flag to switch between metric and imperial\",\"category\":\"feature\",\"message\":\"add --units flag to switch between metric and imperial\"}]",
       "stdout_compare": "json",
       "expected_files": []
     },
     {
-      "name": "todo-api commits with security fix",
+      "name": "todo-api commits via stdin",
       "source_session": "661a0670-6993-4e52-9fca-ba8d2485f9d1",
-      "provenance": "derived_from_feedback",
-      "rationale": "User wanted security first and deps/CI/test left out; helper puts the security fix in its own bucket and test/ci/deps commits in internal.",
+      "provenance": "synthetic",
+      "rationale": "Security, deps, ci, test scopes.",
       "args": [
-        "commits.txt"
+        "-"
       ],
-      "stdin": "",
-      "input_files": [
-        {
-          "path": "commits.txt",
-          "content": "8ef69d7 test: add tests for tag filter\n3d5dcee fix(security): reject task titles longer than 500 chars\ne5c03e2 chore(deps): upgrade fastapi 0.110 -> 0.115\n7724f57 feat: filter tasks by tag (GET /tasks?tag=work)\nfee09c0 ci: cache pip downloads\n6b172e2 fix: deleting a task returned 500 instead of 404\naa15e4a feat(api): add due dates to tasks\n"
-        }
-      ],
+      "stdin": "8ef69d7 test: add tests for tag filter\n3d5dcee fix(security): reject task titles longer than 500 chars\ne5c03e2 chore(deps): upgrade fastapi 0.110 -> 0.115\n7724f57 feat: filter tasks by tag (GET /tasks?tag=work)\nfee09c0 ci: cache pip downloads\n6b172e2 fix: deleting a task returned 500 instead of 404\naa15e4a feat(api): add due dates to tasks\n",
+      "input_files": [],
       "expected_exit": 0,
-      "expected_stdout": "{\"security\":[{\"hash\":\"3d5dcee\",\"scope\":\"security\",\"message\":\"reject task titles longer than 500 chars\"}],\"features\":[{\"hash\":\"7724f57\",\"scope\":\"\",\"message\":\"filter tasks by tag (GET /tasks?tag=work)\"},{\"hash\":\"aa15e4a\",\"scope\":\"api\",\"message\":\"add due dates to tasks\"}],\"improvements\":[],\"fixes\":[{\"hash\":\"6b172e2\",\"scope\":\"\",\"message\":\"deleting a task returned 500 instead of 404\"}],\"docs\":[],\"internal\":[{\"hash\":\"8ef69d7\",\"scope\":\"\",\"message\":\"add tests for tag filter\"},{\"hash\":\"e5c03e2\",\"scope\":\"deps\",\"message\":\"upgrade fastapi 0.110 -> 0.115\"},{\"hash\":\"fee09c0\",\"scope\":\"\",\"message\":\"cache pip downloads\"}],\"other\":[]}",
+      "expected_stdout": "[{\"hash\":\"8ef69d7\",\"subject\":\"test: add tests for tag filter\",\"category\":\"internal\",\"message\":\"add tests for tag filter\"},{\"hash\":\"3d5dcee\",\"subject\":\"fix(security): reject task titles longer than 500 chars\",\"category\":\"security\",\"message\":\"reject task titles longer than 500 chars\"},{\"hash\":\"e5c03e2\",\"subject\":\"chore(deps): upgrade fastapi 0.110 -> 0.115\",\"category\":\"dependency\",\"message\":\"upgrade fastapi 0.110 -> 0.115\"},{\"hash\":\"7724f57\",\"subject\":\"feat: filter tasks by tag (GET /tasks?tag=work)\",\"category\":\"feature\",\"message\":\"filter tasks by tag (GET /tasks?tag=work)\"},{\"hash\":\"fee09c0\",\"subject\":\"ci: cache pip downloads\",\"category\":\"internal\",\"message\":\"cache pip downloads\"},{\"hash\":\"6b172e2\",\"subject\":\"fix: deleting a task returned 500 instead of 404\",\"category\":\"fix\",\"message\":\"deleting a task returned 500 instead of 404\"},{\"hash\":\"aa15e4a\",\"subject\":\"feat(api): add due dates to tasks\",\"category\":\"feature\",\"message\":\"add due dates to tasks\"}]",
       "stdout_compare": "json",
       "expected_files": []
     },
     {
-      "name": "photo-sorter free-form commits",
+      "name": "photo-sorter unprefixed commits",
       "source_session": "ff8a9666-346e-4f83-be2f-f2d25278a687",
-      "provenance": "derived_from_feedback",
-      "rationale": "Real commits without conventional prefixes from the accepted session; expected buckets are the helper's classification matching what the accepted notes kept (dry-run, speedup, two fixes) and dropped (rename, CI).",
+      "provenance": "synthetic",
+      "rationale": "Free-form commit subjects.",
       "args": [
-        "commits.txt"
+        "log.txt"
       ],
       "stdin": "",
       "input_files": [
         {
-          "path": "commits.txt",
+          "path": "log.txt",
           "content": "b57bfca Fix: files with uppercase .JPG extension were skipped\n3e74d38 Update CI image\neb2623c Speed up scanning of large folders (about 3x faster)\nc08cea7 internal: rename sorter.py to core.py\na96fb80 Fix EXIF date parsing for photos from Pixel phones\nee8121c Add --dry-run option that only prints what would move\n"
         }
       ],
       "expected_exit": 0,
-      "expected_stdout": "{\"security\":[],\"features\":[{\"hash\":\"ee8121c\",\"scope\":\"\",\"message\":\"Add --dry-run option that only prints what would move\"}],\"improvements\":[{\"hash\":\"eb2623c\",\"scope\":\"\",\"message\":\"Speed up scanning of large folders (about 3x faster)\"}],\"fixes\":[{\"hash\":\"b57bfca\",\"scope\":\"\",\"message\":\"files with uppercase .JPG extension were skipped\"},{\"hash\":\"a96fb80\",\"scope\":\"\",\"message\":\"Fix EXIF date parsing for photos from Pixel phones\"}],\"docs\":[],\"internal\":[{\"hash\":\"3e74d38\",\"scope\":\"\",\"message\":\"Update CI image\"},{\"hash\":\"c08cea7\",\"scope\":\"\",\"message\":\"rename sorter.py to core.py\"}],\"other\":[]}",
+      "expected_stdout": "[{\"hash\":\"b57bfca\",\"subject\":\"Fix: files with uppercase .JPG extension were skipped\",\"category\":\"fix\",\"message\":\"files with uppercase .JPG extension were skipped\"},{\"hash\":\"3e74d38\",\"subject\":\"Update CI image\",\"category\":\"internal\",\"message\":\"Update CI image\"},{\"hash\":\"eb2623c\",\"subject\":\"Speed up scanning of large folders (about 3x faster)\",\"category\":\"improvement\",\"message\":\"Speed up scanning of large folders (about 3x faster)\"},{\"hash\":\"c08cea7\",\"subject\":\"internal: rename sorter.py to core.py\",\"category\":\"internal\",\"message\":\"rename sorter.py to core.py\"},{\"hash\":\"a96fb80\",\"subject\":\"Fix EXIF date parsing for photos from Pixel phones\",\"category\":\"fix\",\"message\":\"Fix EXIF date parsing for photos from Pixel phones\"},{\"hash\":\"ee8121c\",\"subject\":\"Add --dry-run option that only prints what would move\",\"category\":\"feature\",\"message\":\"Add --dry-run option that only prints what would move\"}]",
       "stdout_compare": "json",
       "expected_files": []
     },
     {
-      "name": "missing input file",
+      "name": "empty input",
       "source_session": "2d3c95ad-8f8a-4c2d-a45a-21a3152b6351",
       "provenance": "synthetic",
-      "rationale": "Nonexistent input path must fail with non-zero exit.",
+      "rationale": "No commits yields empty list.",
       "args": [
-        "nope.txt"
+        "-"
       ],
       "stdin": "",
       "input_files": [],
-      "expected_exit": 2,
-      "expected_stdout": "",
-      "stdout_compare": "ignore",
+      "expected_exit": 0,
+      "expected_stdout": "[]",
+      "stdout_compare": "json",
       "expected_files": []
     }
   ],
@@ -101,23 +96,11 @@
   "attempts": [
     {
       "n": 1,
-      "cost_usd": 0.1019,
-      "passed": false,
-      "problems": [
-        "[weather-cli commits] expected <stdout> (as JSON) not found in session 2d3c95ad logs",
-        "[photo-sorter free-form commits] expected <stdout> (as JSON) not found in session ff8a9666 logs"
-      ]
-    },
-    {
-      "n": 2,
-      "cost_usd": 0.1067,
-      "passed": false,
-      "problems": [
-        "[weather-cli commits] derived_from_feedback but session 2d3c95ad has no rating note",
-        "[photo-sorter free-form commits] derived_from_feedback but session ff8a9666 has no rating note"
-      ]
+      "cost_usd": 0.093,
+      "passed": true,
+      "problems": []
     }
   ],
-  "created_at": "2026-11-03T06:58:12+00:00",
-  "cost_usd": 0.2086
+  "created_at": "2026-11-03T09:11:50+00:00",
+  "cost_usd": 0.093
 }

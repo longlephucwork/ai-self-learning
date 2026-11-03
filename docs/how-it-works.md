@@ -19,12 +19,12 @@ store/                                 # git-ignored: personal session data
   sessions/<session_id>/
     session.json         # metadata, requests, tool steps, files touched, final result
     transcript.jsonl.gz  # redacted copy of the full transcript
-    ratings.jsonl        # append-only outcome history; the last line wins
+    ratings.jsonl        # append-only outcome history: your latest rating wins, else the latest inferred one
     summary.json         # Phase 2 structured summary (written only by detect/)
   hook_events.jsonl      # append-only log of Stop / SessionEnd / backfill events
   hook_errors.log
 ```
-Only the hook writes `session.json`, and only `review/cli.py rate` writes `ratings.jsonl`, so they never race. `session.json` is updated under a per-session `flock` and replaced by atomic rename. Appends to the JSONL files use one `O_APPEND` write per line. Everything can be read with `cat`, `jq` or an editor.
+Only the hook writes `session.json`, and only `review/cli.py rate` and the automatic rater append to `ratings.jsonl`, so they never race. `session.json` is updated under a per-session `flock` and replaced by atomic rename. Appends to the JSONL files use one `O_APPEND` write per line. Everything can be read with `cat`, `jq` or an editor.
 
 ### Hook design (checked against the Claude Code hooks docs, Nov 2026)
 - **Stop** fires after every turn and ingests the whole session again (idempotent). Data survives even when a session is killed without a clean exit, which is common in cloud containers. It takes `last_assistant_message` from the payload because the docs say the transcript may lag at Stop time. It skips when `stop_hook_active` is true.
@@ -102,7 +102,10 @@ If validation passes, the pattern's status becomes `proposed` and it waits for P
 | Safety scan (`harness_lib/scan.py`) | AST/regex flags for network, subprocess/eval, environment or credential access, deletion, and absolute or parent paths. Any of these fails validation and is shown to the reviewer. `write_any` is informational only. |
 | Sandbox (`validate/replay.py`) | Each test runs in a fresh temp dir under `unshare -rn` (no network), with `python3 -I`, an environment of only `PATH`/`LANG`/`HOME`, CPU 10s, 512MB memory, 10MB max file size and a 20s timeout. If network isolation is unavailable, it refuses to run unless `--allow-no-netns` is passed. |
 
-Skills are checked statically only: frontmatter `name`/`description`, and any `scripts/...` they reference must exist. Behavioural evaluation of skills needs a model run and isn't implemented yet.
+**Skills** are validated differently, because a skill is instructions rather than code:
+1. **Structure:** frontmatter `name` and `description`; every `scripts/...` it mentions exists. Bundled scripts must be run from the skill's base directory, which Claude Code shows when the skill loads, never by a bare relative path (Claude runs commands from the project folder).
+2. **Bundled scripts are tested** in the sandbox, like scripts. Each test names its `script`. Their expected outputs are usually intermediate data that never appears in the logs, so these tests are normally `synthetic`. They must pass, but they aren't evidence for the skill.
+3. **Judged checks** (`validate/judge.py`) are the evidence. For each successful session (up to 5), a model with no tools sees the skill, the session's request, steps and accepted result, and your rating note. It decides whether following the skill would produce what you accepted, including the correction in an `edited` note. Every check must pass, for at least `min(3, successful sessions)`. This is a model's judgment, not execution, and `review` shows each verdict with the rules it checked. It runs only after everything cheaper has passed, uses `claude-sonnet-5-5` by default (`$LEARNING_HARNESS_JUDGE_MODEL`), and results are cached by content, so re-validating or approving an unchanged draft costs nothing.
 
 **Note:** tests are built from real session data, so `generated/` contains (redacted) snippets of your sessions, and that folder is committed to git.
 
@@ -208,4 +211,33 @@ That makes it available in every project. Sessions inside this repo also pick it
 python3 refine/refine.py expose csv-to-json        # drafts generated/csv_to_json/
 python3 review/cli.py review csv_to_json
 python3 review/cli.py approve csv_to_json
+```
+
+## Automatic learning (`refine/auto.py`)
+
+With automatic learning on (the installer asks; or `store/config.json` → `"auto": {"enabled": true}`), nothing between "you use Claude Code" and "Claude tells you a draft is ready" needs you. Only the approval does.
+
+1. **Trigger.** When a session ends, the `SessionEnd` hook checks the throttle. If a run is due, it starts `refine.py auto` as a detached background process and returns at once. A lock file prevents two runs at once (a stale lock is replaced after 2 hours).
+2. **Inferred ratings.** Each finished session you haven't rated gets an outcome from one Haiku call (about $0.001), judged from the session itself: a follow-up correction reads as `edited` and its content becomes the note. Ratings below `min_confidence` (0.6) are stored as `unknown` and don't count. They're stored with `source: inferred`; your own rating always wins, and inferred ratings show as `accepted~` in `review/cli.py list`.
+3. **Detect and draft.** New sessions are summarised and grouped, then up to `max_drafts_per_run` new candidates are drafted and validated. A candidate whose draft failed is retried only after `retry_days`.
+4. **Tell you.** A `SessionStart` hook reads the validated drafts (local files only, no model call) and adds a short note to Claude's context. Claude mentions the draft once, early in your next session, and offers to show it. It only runs `review/cli.py approve` after your explicit yes. Each draft version is announced once (`store/notified.json`).
+
+**Settings** (`store/config.json`, key `auto`):
+
+| Key | Default | Meaning |
+|---|---|---|
+| `enabled` | `false` (the installer offers `true`) | on/off |
+| `monthly_budget_usd` | `5.0` | background runs stop when this month's spend reaches it |
+| `min_hours_between_runs` | `24` | throttle |
+| `min_new_sessions` | `3` | finished sessions needed since the last run |
+| `max_drafts_per_run` | `1` | caps drafting cost per run |
+| `retry_days` | `7` | wait before re-drafting a candidate that failed |
+| `min_confidence` | `0.6` | below this, an inferred rating counts as `unknown` |
+
+**Budget.** Every model call's cost goes to `store/spend.jsonl`, including failed or aborted calls. In background runs each call checks the month's total first, and its own `--max-budget-usd` is capped at what remains, so the cap can't be overshot. Typical spend: about $0.001 per session for rating and summarising, plus $0.05–0.20 per drafted artifact (judged checks included).
+
+```bash
+python3 refine/refine.py auto-status     # on/off, spend vs budget, next run, drafts waiting
+python3 refine/refine.py auto --force    # run now, ignoring the throttle
+tail store/auto.log                      # what the background runs did
 ```

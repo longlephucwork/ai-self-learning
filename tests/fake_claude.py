@@ -11,7 +11,17 @@ if log:
         fh.write(json.dumps({"args": args, "cwd": os.getcwd(),
                              "disable": os.environ.get("LEARNING_HARNESS_DISABLE")}) + "\n")
 
-if "argv_template_json" in schema["properties"]:  # refine/expose.py
+if "confidence" in schema["properties"]:  # refine/auto.py inferred ratings
+    out = {"outcome": "accepted", "confidence": float(os.environ.get("FAKE_RATE_CONF", "0.7")), "note": "",
+           "reason": "fake rater"}
+    for needle, (o, conf, note) in json.loads(os.environ.get("FAKE_RATE_RULES", "{}")).items():
+        if needle in prompt:
+            out.update(outcome=o, confidence=conf, note=note)
+elif "verdict" in schema["properties"]:  # validate/judge.py
+    out = {"verdict": os.environ.get("FAKE_JUDGE_VERDICT", "pass"),
+           "checks": [{"rule": "follow the user's note", "consistent": True, "evidence": "fake"}],
+           "reason": "fake judge"}
+elif "argv_template_json" in schema["properties"]:  # refine/expose.py
     key = "FAKE_EXPOSE_FILE_2" if "previous attempt failed" in prompt and os.environ.get("FAKE_EXPOSE_FILE_2") \
         else "FAKE_EXPOSE_FILE"
     out = json.load(open(os.environ[key]))

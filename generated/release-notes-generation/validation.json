@@ -1,29 +1,62 @@
 {
-  "validated_at": "2026-11-03T06:58:12+00:00",
+  "validated_at": "2026-11-03T09:11:23+00:00",
   "network_isolated": true,
-  "tests": [],
+  "tests": [
+    {
+      "name": "weather-cli commits",
+      "passed": true,
+      "problems": [],
+      "exit": 0,
+      "stdout": "[\n  {\n    \"hash\": \"f4926fe\",\n    \"subject\": \"refactor: split api client into its own module\",\n    \"category\": \"internal\",\n    \"message\": \"split api client into its own module\"\n  },\n  {\n    \"hash\": \"00161c6\",\n    \"subject\": \"feat: show a 3-day forecast with --days\",\n    \"category\": \"feature\",\n    \"message\": \"show a 3-day forecast with --days\"\n  },\n  {\n    \"hash\": \"dc79f36\",\n    \"subject\": \"docs: explain the config file location\",\n    \"category\": \"docs\",\n    \"message\": \"explain the config file location\"\n  },\n  {\n    \"hash\": \"4f18067\",\n    \"subject\": \"chore: bump pytest to 8.3\",\n    \"category\": \"internal\",\n    \"message\": \"bump pytest to 8.3\"\n  },\n  {\n    \"hash\": \"29a15d5\",\n    \"subject\": \"fix: crash when the city name contains spaces\",\n    \"category\": \"fix\",\n    \"message\": \"crash when the city name contains spaces\"\n  },\n  {\n    \"hash\": \"1b50316\",\n    \"subject\": \"feat: add --units flag to switch between metric and imperial\",\n    \"category\": \"feature\",\n    \"message\": \"add --units flag to switch between metric and imperial\"\n  }\n]\n",
+      "stderr": "",
+      "unexpected_new_files": []
+    },
+    {
+      "name": "todo-api commits via stdin",
+      "passed": true,
+      "problems": [],
+      "exit": 0,
+      "stdout": "[\n  {\n    \"hash\": \"8ef69d7\",\n    \"subject\": \"test: add tests for tag filter\",\n    \"category\": \"internal\",\n    \"message\": \"add tests for tag filter\"\n  },\n  {\n    \"hash\": \"3d5dcee\",\n    \"subject\": \"fix(security): reject task titles longer than 500 chars\",\n    \"category\": \"security\",\n    \"message\": \"reject task titles longer than 500 chars\"\n  },\n  {\n    \"hash\": \"e5c03e2\",\n    \"subject\": \"chore(deps): upgrade fastapi 0.110 -> 0.115\",\n    \"category\": \"dependency\",\n    \"message\": \"upgrade fastapi 0.110 -> 0.115\"\n  },\n  {\n    \"hash\": \"7724f57\",\n    \"subject\": \"feat: filter tasks by tag (GET /tasks?tag=work)\",\n    \"category\": \"feature\",\n    \"message\": \"filter tasks by tag (GET /tasks?tag=work)\"\n  },\n  {\n    \"hash\": \"fee09c0\",\n    \"subject\": \"ci: cache pip downloads\",\n    \"category\": \"internal\",\n    \"message\": \"cache pip downloads\"\n  },\n  {\n    \"hash\": \"6b172e2\",\n    \"subject\": \"fix: deleting a task returned 500 instead of 404\",\n    \"category\": \"fix\",\n    \"message\": \"deleting a task returned 500 instead of 404\"\n  },\n  {\n    \"hash\": \"aa15e4a\",\n    \"subject\": \"feat(api): add due dates to tasks\",\n    \"category\": \"feature\",\n    \"message\": \"add due dates to tasks\"\n  }\n]\n",
+      "stderr": "",
+      "unexpected_new_files": []
+    },
+    {
+      "name": "photo-sorter unprefixed commits",
+      "passed": true,
+      "problems": [],
+      "exit": 0,
+      "stdout": "[\n  {\n    \"hash\": \"b57bfca\",\n    \"subject\": \"Fix: files with uppercase .JPG extension were skipped\",\n    \"category\": \"fix\",\n    \"message\": \"files with uppercase .JPG extension were skipped\"\n  },\n  {\n    \"hash\": \"3e74d38\",\n    \"subject\": \"Update CI image\",\n    \"category\": \"internal\",\n    \"message\": \"Update CI image\"\n  },\n  {\n    \"hash\": \"eb2623c\",\n    \"subject\": \"Speed up scanning of large folders (about 3x faster)\",\n    \"category\": \"improvement\",\n    \"message\": \"Speed up scanning of large folders (about 3x faster)\"\n  },\n  {\n    \"hash\": \"c08cea7\",\n    \"subject\": \"internal: rename sorter.py to core.py\",\n    \"category\": \"internal\",\n    \"message\": \"rename sorter.py to core.py\"\n  },\n  {\n    \"hash\": \"a96fb80\",\n    \"subject\": \"Fix EXIF date parsing for photos from Pixel phones\",\n    \"category\": \"fix\",\n    \"message\": \"Fix EXIF date parsing for photos from Pixel phones\"\n  },\n  {\n    \"hash\": \"ee8121c\",\n    \"subject\": \"Add --dry-run option that only prints what would move\",\n    \"category\": \"feature\",\n    \"message\": \"Add --dry-run option that only prints what would move\"\n  }\n]\n",
+      "stderr": "",
+      "unexpected_new_files": []
+    },
+    {
+      "name": "empty input",
+      "passed": true,
+      "problems": [],
+      "exit": 0,
+      "stdout": "[]\n",
+      "stderr": "",
+      "unexpected_new_files": []
+    }
+  ],
   "provenance": [
     {
       "name": "weather-cli commits",
-      "provenance": "derived_from_feedback",
-      "problems": [
-        "derived_from_feedback but session 2d3c95ad has no rating note"
-      ]
-    },
-    {
-      "name": "todo-api commits with security fix",
-      "provenance": "derived_from_feedback",
+      "provenance": "synthetic",
       "problems": []
     },
     {
-      "name": "photo-sorter free-form commits",
-      "provenance": "derived_from_feedback",
-      "problems": [
-        "derived_from_feedback but session ff8a9666 has no rating note"
-      ]
+      "name": "todo-api commits via stdin",
+      "provenance": "synthetic",
+      "problems": []
     },
     {
-      "name": "missing input file",
+      "name": "photo-sorter unprefixed commits",
+      "provenance": "synthetic",
+      "problems": []
+    },
+    {
+      "name": "empty input",
       "provenance": "synthetic",
       "problems": []
     }
@@ -31,12 +64,147 @@
   "coverage": {
     "successful_sessions": 3,
     "covered": 3,
-    "required": 3
+    "required": 3,
+    "method": "judged"
   },
-  "passed": false,
-  "problems": [
-    "[weather-cli commits] derived_from_feedback but session 2d3c95ad has no rating note",
-    "[photo-sorter free-form commits] derived_from_feedback but session ff8a9666 has no rating note"
+  "judged": [
+    {
+      "session_id": "2d3c95ad-8f8a-4c2d-a45a-21a3152b6351",
+      "key": "eb07f143662bbe95",
+      "verdict": "pass",
+      "checks": [
+        {
+          "rule": "Find the tag and list commits since it; classify them",
+          "consistent": true,
+          "evidence": "Session ran `git tag && git log --oneline v1.0..HEAD`. The user named v1.0, so the skill uses it. The skill's script and log steps give the same commit list."
+        },
+        {
+          "rule": "Title `# Release Notes` and `## What's new since <tag>`, with no invented version or date",
+          "consistent": true,
+          "evidence": "Accepted file used `# Release Notes` and `## Changes since v1.0`, with no version or date. The skill's heading wording differs slightly, which is a formatting difference the user wouldn't care about."
+        },
+        {
+          "rule": "Sections in order and only when non-empty (Security first, then New features, Improvements, Bug fixes, Documentation)",
+          "consistent": true,
+          "evidence": "Accepted output has New features, Bug fixes and Documentation. The empty Security and Improvements sections are omitted, as the skill requires."
+        },
+        {
+          "rule": "Write for end users with bold feature names and flags in backticks",
+          "consistent": true,
+          "evidence": "Accepted bullets: \"**Choose your units.** A new `--units` flag…\" and \"**Multi-day forecasts.** Use `--days`…\"."
+        },
+        {
+          "rule": "Omit internal-only changes (refactor, chore, tests); omit dependency bumps unless users would notice",
+          "consistent": true,
+          "evidence": "The accepted notes leave out the refactor and the pytest 8.3 bump, matching the skill."
+        },
+        {
+          "rule": "If commits only touch CHANGES.txt, rely on the messages",
+          "consistent": true,
+          "evidence": "The diff stat shows only CHANGES.txt changed. The session wrote the notes from the commit messages and said so in its reply."
+        },
+        {
+          "rule": "One-line reply: file saved, what was covered, what was left out, and that a version number must be added",
+          "consistent": true,
+          "evidence": "The session's one-sentence reply covers the file, the contents and the omissions. The skill adds a version-number reminder, which is harmless and consistent with the user's one-line request."
+        }
+      ],
+      "reason": "Following the skill would produce essentially the accepted output. The content, section selection, omissions and one-line reply all match. The only differences are the heading wording and a version-number reminder in the reply, and neither is likely to bother the user.",
+      "cost_usd": 0.0237,
+      "cached": false
+    },
+    {
+      "session_id": "661a0670-6993-4e52-9fca-ba8d2485f9d1",
+      "key": "99473b02968ad2ec",
+      "verdict": "pass",
+      "checks": [
+        {
+          "rule": "Security section always first",
+          "consistent": true,
+          "evidence": "Note: 'put security fixes first'; the skill mandates Security first, fixing the draft's order (Security came after Bug fixes)."
+        },
+        {
+          "rule": "Omit internal-only changes (CI, tests, refactor)",
+          "consistent": true,
+          "evidence": "Commits 'ci: cache pip downloads' and 'test: add tests for tag filter' are omitted, matching the note."
+        },
+        {
+          "rule": "Omit dependency upgrades unless users would notice them",
+          "consistent": true,
+          "evidence": "The draft listed the FastAPI upgrade under 'Under the hood'; the note asks to leave it out. A silent fastapi bump has no user-visible effect, so the skill omits it."
+        },
+        {
+          "rule": "Only the allowed sections, in order (no 'Under the hood')",
+          "consistent": true,
+          "evidence": "The skill's section list has no 'Under the hood', so that section is dropped, as the note wants."
+        },
+        {
+          "rule": "Say what to do when behaviour changes (500-char limit)",
+          "consistent": true,
+          "evidence": "The draft's 'shorten them to 500 characters or fewer' fits the rule and stays in the output."
+        },
+        {
+          "rule": "Do not invent a version number or date; title and heading format",
+          "consistent": true,
+          "evidence": "The draft used '# Release Notes' and '## What's new since v1.0' with no version number."
+        },
+        {
+          "rule": "One-line reply: file saved, what was covered, what was left out, and a version number must be added",
+          "consistent": true,
+          "evidence": "The user asked for a one-line reply, and the final message follows this pattern. The skill's version would no longer mention the dependency upgrade as covered."
+        },
+        {
+          "rule": "Use the user-named tag and the helper script",
+          "consistent": true,
+          "evidence": "The user named v1.0, so step 1 is satisfied. The classifier script is only a helper, so the commit set is the same either way."
+        }
+      ],
+      "reason": "Following the skill would give the corrected behaviour. Security comes first, and the dependency upgrade, CI and test commits are omitted. The 500-character limit gets its user action, and the version number is not invented. The one-line reply format is also compatible with what the user asked for.",
+      "cost_usd": 0.0224,
+      "cached": false
+    },
+    {
+      "session_id": "ff8a9666-346e-4f83-be2f-f2d25278a687",
+      "key": "b7397ff40b165889",
+      "verdict": "pass",
+      "checks": [
+        {
+          "rule": "Use the user-named tag (v1.0) and header '## What's new since v1.0', no invented version/date",
+          "consistent": true,
+          "evidence": "Accepted file has '# Release Notes' / '## What's new since v1.0' with no version/date."
+        },
+        {
+          "rule": "Sections ordered, only non-empty (Security omitted when none)",
+          "consistent": true,
+          "evidence": "Accepted has New features, Improvements, Bug fixes only; no security commits exist."
+        },
+        {
+          "rule": "Omit internal-only changes (rename, CI)",
+          "consistent": true,
+          "evidence": "Accepted left out 'internal: rename sorter.py to core.py' and 'Update CI image'."
+        },
+        {
+          "rule": "Write for end users, bold feature name, flags in backticks",
+          "consistent": true,
+          "evidence": "'**`--dry-run` option**: preview which files would be moved...'"
+        },
+        {
+          "rule": "Speed-up goes under Improvements by user benefit",
+          "consistent": true,
+          "evidence": "'**Faster scanning**: large folders are now scanned about 3x faster.' under Improvements."
+        },
+        {
+          "rule": "One-sentence reply: file saved, covered, left out, and note that version must be added",
+          "consistent": true,
+          "evidence": "Accepted reply is one sentence covering file, items and omissions; the skill's extra 'version number must be added' clause is a minor addition the user would not likely object to."
+        }
+      ],
+      "reason": "The skill's rules match the accepted output: correct tag, section structure, omission of internal commits, user-benefit wording, and a one-sentence reply. The only difference is a mention that the version number must be added, which is minor.",
+      "cost_usd": 0.0196,
+      "cached": false
+    }
   ],
-  "fingerprint": "ce0816654699d78c"
+  "passed": true,
+  "problems": [],
+  "fingerprint": "5703cbc76212729c"
 }

@@ -246,20 +246,23 @@ def resolve_session(prefix: str) -> str:
 
 # ---------- outcomes ----------
 
-def rate(sid: str, outcome: str, note: str | None = None, source: str = "manual") -> None:
+def rate(sid: str, outcome: str, note: str | None = None, source: str = "manual", **extra) -> None:
     if outcome not in OUTCOMES:
         raise ValueError(f"outcome must be one of {OUTCOMES}")
     d = session_dir(sid)
     if not (d / "session.json").exists():
         raise LookupError(f"no session {sid!r}")
-    append_jsonl(d / "ratings.jsonl", {"outcome": outcome, "source": source, "note": note, "created_at": now()})
+    append_jsonl(d / "ratings.jsonl", {"outcome": outcome, "source": source, "note": note, "created_at": now(),
+                                       **extra})
 
 
 def outcome(sid: str) -> dict:
+    """The latest manual rating if there is one (you always win), else the latest inferred one."""
     hist = read_jsonl(session_dir(sid) / "ratings.jsonl")
     if not hist:
         return {"outcome": "unknown", "source": None, "note": None, "created_at": None}
-    return hist[-1]
+    manual = [h for h in hist if h.get("source", "manual") == "manual"]
+    return manual[-1] if manual else hist[-1]
 
 
 # ---------- summaries (Phase 2; written only by detect/) ----------

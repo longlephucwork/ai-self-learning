@@ -281,9 +281,13 @@ def validate_exposure(proposal: dict, files: dict[str, str], *, allow_no_netns=F
     return rep
 
 
-def validate_draft(proposal: dict, files: dict[str, str], pattern: dict, *, allow_no_netns=False) -> dict:
+def validate_draft(proposal: dict, files: dict[str, str], pattern: dict, *, allow_no_netns=False,
+                   previous: dict | None = None) -> dict:
+    """`previous` is an earlier validation report of this draft: its judged checks are reused when unchanged."""
     if proposal.get("wraps"):
         return validate_exposure(proposal, files, allow_no_netns=allow_no_netns)
+    if proposal["type"] == "skill":
+        return validate_skill(proposal, files, pattern, allow_no_netns=allow_no_netns, previous=previous)
     netns = netns_available()
     report = {"validated_at": store.now(), "network_isolated": netns, "tests": [], "provenance": [],
               "coverage": {}, "passed": False, "problems": []}
@@ -342,22 +346,88 @@ def validate_draft(proposal: dict, files: dict[str, str], pattern: dict, *, allo
                     report["tests"].append(r)
                     if not r["passed"]:
                         report["problems"].append(f"[{t['name']}] failed: {'; '.join(r['problems'])}")
-    else:  # skill: static checks only (behavioural evaluation needs a model run)
-        skill = files.get("SKILL.md", "")
-        m = re.match(r"^---\n(.*?)\n---\n", skill, re.S)
-        if not m:
-            report["problems"].append("SKILL.md missing YAML frontmatter")
-        else:
-            fm = m.group(1)
-            for key in ("name", "description"):
-                if not re.search(rf"^{key}:\s*\S", fm, re.M):
-                    report["problems"].append(f"SKILL.md frontmatter missing {key}")
-        for ref in re.findall(r"`(scripts/[^`\s]+)`", skill):
-            if ref not in files:
-                report["problems"].append(f"SKILL.md references missing file {ref}")
     report["passed"] = not report["problems"]
     report["fingerprint"] = fingerprint(files, tests)
     return report
+
+
+def skill_script_for(test: dict, files: dict[str, str]) -> str | None:
+    """Which bundled script a skill test runs: its `script` field, or the only .py file."""
+    if test.get("script"):
+        return test["script"]
+    pys = [p for p in files if p.endswith(".py")]
+    return pys[0] if len(pys) == 1 else None
+
+
+def validate_skill(proposal: dict, files: dict[str, str], pattern: dict, *, allow_no_netns=False,
+                   previous: dict | None = None) -> dict:
+    """Skills: structure, bundled scripts' tests in the sandbox, then a judged check per successful session."""
+    from validate import judge
+    netns = netns_available()
+    rep = {"validated_at": store.now(), "network_isolated": netns, "tests": [], "provenance": [],
+           "coverage": {}, "judged": [], "passed": False, "problems": []}
+    P = rep["problems"]
+    skill = files.get("SKILL.md", "")
+    m = re.match(r"^---\n(.*?)\n---\n", skill, re.S)
+    if not m:
+        P.append("SKILL.md missing YAML frontmatter")
+    else:
+        for key in ("name", "description"):
+            if not re.search(rf"^{key}:\s*\S", m.group(1), re.M):
+                P.append(f"SKILL.md frontmatter missing {key}")
+    for ref in set(re.findall(r"(?<![\w.-])(scripts/[\w./-]+\.\w+)", skill)):
+        if ref not in files:
+            P.append(f"SKILL.md references missing file {ref}")
+    if re.search(r"\b(?:python3?|bash|sh|node)\s+\.?/?scripts/", skill):
+        P.append("SKILL.md runs a bundled script by a bare relative path; Claude runs commands from the "
+                 "project folder, so use the skill's base directory (shown when the skill loads)")
+
+    # 1. bundled scripts: provenance-checked like any test, then run in the sandbox; they must pass.
+    members = set(pattern["session_ids"]) - set(pattern.get("excluded_injection", []))
+    tests, cache = proposal.get("tests", []), {}
+    for t in tests:
+        probs = check_provenance(t, members, cache)
+        rep["provenance"].append({"name": t["name"], "provenance": t.get("provenance"), "problems": probs})
+        P += [f"[{t['name']}] {p}" for p in probs]
+    has_scripts = any(p.endswith(".py") for p in files)
+    if has_scripts and not tests:
+        P.append("the skill bundles scripts but has no tests for them")
+    if tests:
+        ok, why = sandbox.may_run(allow_no_netns)
+        if not ok:
+            P.append(why)
+        else:
+            for t in tests:
+                script = skill_script_for(t, files)
+                if script not in files:
+                    P.append(f"[{t['name']}] names no bundled script to run (set `script`)")
+                    continue
+                r = run_test(files, script, t, netns=netns)
+                rep["tests"].append(r)
+                if not r["passed"]:
+                    P.append(f"[{t['name']}] failed: {'; '.join(r['problems'])}")
+
+    # 2. evidence: a judged check against each successful session (only once everything cheaper passed).
+    successful = sorted(m for m in members
+                        if store.outcome(m)["outcome"] in pattern.get("success_outcomes", ["accepted"]))
+    need = min(3, len(successful))
+    if not P:
+        judged = judge.judge_skill(files, successful, previous=(previous or {}).get("judged"))
+        rep["judged"] = judged
+        passed = [j for j in judged if j["verdict"] == "pass"]
+        for j in judged:
+            if j["verdict"] != "pass":
+                P.append(f"[judged {j['session_id'][:8]}] {j['verdict']}: {j['reason'][:300]}")
+        rep["coverage"] = {"successful_sessions": len(successful), "covered": len(passed), "required": need,
+                           "method": "judged"}
+        if len(passed) < need:
+            P.append(f"judged checks passed for {len(passed)} successful session(s); need {need}")
+    else:
+        rep["coverage"] = {"successful_sessions": len(successful), "covered": 0, "required": need,
+                           "method": "judged (skipped: fix the problems above first)"}
+    rep["passed"] = not P
+    rep["fingerprint"] = fingerprint(files, tests)
+    return rep
 
 
 def fingerprint(files: dict[str, str], tests: list) -> str:
@@ -394,7 +464,8 @@ def main(argv=None):
     pattern = store.load_pattern(proposal["pattern_key"])
     if not pattern:
         sys.exit(f"error: pattern {proposal['pattern_key']!r} not found")
-    rep = validate_draft(proposal, files, pattern, allow_no_netns=a.allow_no_netns)
+    rep = validate_draft(proposal, files, pattern, allow_no_netns=a.allow_no_netns,
+                         previous=store.read_json(d / "validation.json"))
     store.write_json_atomic(d / "validation.json", rep)
     print_report(rep)
     sys.exit(0 if rep["passed"] else 1)
@@ -404,8 +475,13 @@ def print_report(rep: dict) -> None:
     print(f"network isolated: {rep['network_isolated']}")
     for t in rep["tests"]:
         print(f"  {'PASS' if t['passed'] else 'FAIL'}  {t['name']}" + ("" if t["passed"] else f"  -- {'; '.join(t['problems'])}"))
+    for j in rep.get("judged", []):
+        tag = " (cached)" if j.get("cached") else ""
+        print(f"  {'PASS' if j['verdict'] == 'pass' else j['verdict'].upper():5} judged vs session {j['session_id'][:8]}{tag}: "
+              f"{j['reason'][:110]}")
     c = rep["coverage"]
-    print(f"coverage: {c.get('covered')}/{c.get('successful_sessions')} successful sessions (need {c.get('required')})")
+    how = f" [{c['method']}]" if c.get("method") else ""
+    print(f"coverage: {c.get('covered')}/{c.get('successful_sessions')} successful sessions (need {c.get('required')}){how}")
     for p in rep["provenance"]:
         print(f"  provenance {p['provenance']:22} {p['name']}: {'ok' if not p['problems'] else '; '.join(p['problems'])}")
     print("RESULT:", "PASSED" if rep["passed"] else "FAILED")

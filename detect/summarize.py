@@ -68,7 +68,7 @@ do the whole job with no judgment, writing or interpretation. Explain in determi
 - tools_used: Claude Code tool names that mattered."""
 
 
-def build_digest(sid: str) -> str:
+def build_digest(sid: str, step_chars: int = 400) -> str:
     s = store.load_session(sid)
     o = store.outcome(sid)
     steps = s["steps"]
@@ -83,9 +83,9 @@ def build_digest(sid: str) -> str:
             parts.append(f"... {len(steps) - MAX_STEPS_IN_DIGEST} steps omitted ...")
             continue
         err = " [ERROR]" if st["is_error"] else ""
-        parts.append(f"- {st['tool_name']}{err}: {st['input_json'][:400]}")
+        parts.append(f"- {st['tool_name']}{err}: {st['input_json'][:step_chars]}")
         if st["result_preview"]:
-            parts.append(f"    -> {st['result_preview'][:200]}")
+            parts.append(f"    -> {st['result_preview'][:max(200, step_chars // 4)]}")
     if s["files_touched"]:
         parts.append("\n## FILES TOUCHED")
         parts += [f"- {f['action']}: {f['path']}" for f in s["files_touched"][:40]]

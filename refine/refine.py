@@ -6,6 +6,8 @@
   refine.py report [--stale-days 60] [--min-failures 2] [--fail-rate 0.3]
   refine.py revise <name> [--model M]          draft v(N+1) from the failures (normal review/approve applies)
   refine.py expose <script> [--model M]        draft an MCP tool that wraps an installed script (no new code)
+  refine.py auto [--force]                     one automatic-learning run (normally started by the SessionEnd hook)
+  refine.py auto-status                        settings, budget, last run, drafts waiting
   refine.py cycle [--generate N] [--no-detect] one maintenance pass: detect -> draft new candidates -> report
 
 Nothing here installs, uninstalls or changes an artifact. It writes reports
@@ -240,6 +242,8 @@ def main(argv=None):
     p.add_argument("--max-attempts", type=int, default=2)
     p = sub.add_parser("expose"); p.add_argument("name"); p.add_argument("--model")
     p.add_argument("--max-attempts", type=int, default=2)
+    p = sub.add_parser("auto"); p.add_argument("--force", action="store_true", help="ignore the throttle")
+    sub.add_parser("auto-status")
     a = ap.parse_args(argv)
     installed = reg.load_registry()["installed"]
 
@@ -289,6 +293,26 @@ def main(argv=None):
             name = Path(r["draft"]).name
             print(f"review: python3 review/cli.py diff {name}  then  python3 review/cli.py approve {name}")
         return 0 if r["passed"] else 1
+    elif a.cmd == "auto":
+        from refine import auto
+        r = auto.run(force=a.force)
+        if not r["ran"]:
+            print(f"not run: {r['reason']}")
+        return 0
+    elif a.cmd == "auto-status":
+        from refine import auto
+        from harness_lib.claude_cli import month_spend
+        cfg, st = auto.config(), auto.state()
+        print(f"automatic learning: {'ON' if cfg['enabled'] else 'off'}")
+        print(f"budget: ${month_spend():.2f} of ${cfg['monthly_budget_usd']:.2f} used this month")
+        print(f"throttle: at most every {cfg['min_hours_between_runs']}h, after {cfg['min_new_sessions']}+ new sessions")
+        ok, why = auto.should_run()
+        print(f"next run: {'due now' if ok else why}")
+        lr = st.get("last_result") or {}
+        print(f"last run: {st.get('last_run_at', 'never')}" + (f" (spent ${lr.get('spent_usd', 0):.3f})" if lr else ""))
+        for i in auto.inbox():
+            print(f"waiting for you: {i['type']} {i['draft']}  ->  python3 review/cli.py review {i['draft']}")
+        return 0
     elif a.cmd == "expose":
         from harness_lib.claude_cli import ClaudeError
         from refine.expose import expose

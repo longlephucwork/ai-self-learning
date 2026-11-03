@@ -1,0 +1,31 @@
+{
+  "key": "meeting-notes-summarization",
+  "label": "Meeting transcript to structured notes",
+  "description": "Turn a plain-text meeting transcript, standup log, or retro notes into a markdown file with attendees, decisions, action items with owners and deadlines, and open questions.",
+  "status": "proposed",
+  "n_sessions": 3,
+  "n_success": 3,
+  "success_outcomes": [
+    "accepted",
+    "edited"
+  ],
+  "min_success": 3,
+  "deterministic_frac": 0.0,
+  "suggested_type": "skill",
+  "type_rationale": "Identifying decisions, action items, and open questions from free-form speech requires interpretation. The skill can follow user formatting rules and update an existing notes file.",
+  "session_ids": [
+    "404ed6db-e36c-477d-a00f-52dcbdb8d9bf",
+    "ceccc598-36a3-4791-bd64-5991fb0f3375",
+    "d24589af-398b-4bf3-b234-15aaf8bc02c6"
+  ],
+  "excluded_injection": [],
+  "method": "claude",
+  "created_at": "2026-11-03T09:09:04+00:00",
+  "updated_at": "2026-11-03T09:09:04+00:00",
+  "last_proposal": {
+    "draft": "generated/meeting-notes-summarization",
+    "at": "2026-11-03T09:09:44+00:00",
+    "passed": true
+  },
+  "proposal": "generated/meeting-notes-summarization"
+}

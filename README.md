@@ -20,6 +20,7 @@ irm https://raw.githubusercontent.com/longlephucwork/claude-learning-harness/mai
 The installer clones the repo to `~/claude-learning-harness`, then asks before each change:
 - session-logging hooks
 - the `learned` MCP server
+- automatic learning, with a $5/month budget
 - `bin/` on your PATH
 
 `python3 install.py --check` shows the status; `python3 install.py --uninstall` undoes it. Per-OS notes and step-by-step checks for Linux, macOS, Windows, WSL and Docker are in **[docs/testing-installs.md](docs/testing-installs.md)**.
@@ -27,10 +28,15 @@ The installer clones the repo to `~/claude-learning-harness`, then asks before e
 ## How it works
 
 1. **Capture.** Hooks log each Claude Code session to `store/`, with secrets redacted.
-2. **Detect.** Claude summarises sessions and groups similar ones. A group with 3+ sessions you rated `accepted` or `edited` becomes a candidate.
-3. **Generate.** Claude drafts the artifact plus tests made from the logged inputs and outputs. The tests run in a no-network sandbox.
-4. **Review.** You see the evidence, the code, a safety scan and the test results, then approve or reject.
-5. **Refine.** Usage is tracked. Failing or unused artifacts get revision or retirement suggestions.
+2. **Rate.** Each finished session is rated `accepted`, `edited` or `redone`, inferred automatically from the session (for example, a follow-up correction means `edited`). A rating you give yourself always wins.
+3. **Detect.** Sessions are summarised and grouped. A group with 3+ successful sessions becomes a candidate.
+4. **Generate.** Claude drafts the artifact with evidence from your sessions:
+   - scripts and tools get tests built from the logged inputs and outputs, run in a no-network sandbox
+   - skills are checked by a model against every session you accepted, including your corrections
+5. **Tell you.** At the start of your next session, Claude mentions the draft once and offers to show it. You approve or reject it.
+6. **Refine.** Usage is tracked. Failing or unused artifacts get revision or retirement suggestions.
+
+Steps 2–5 run by themselves in the background: at most once a day, after 3+ new sessions, within a monthly budget ($5 by default; about $0.001 per session plus $0.05–0.20 per draft). Only approving needs you. Check it with `python3 refine/refine.py auto-status`, or turn it off with `"auto": {"enabled": false}` in `store/config.json`.
 
 Approved tools are served to Claude through the local MCP server. It isn't a hosted service: Claude Code starts it as a child process. Claude sees each tool as `mcp__learned__<name>` and uses it by itself.
 
@@ -42,8 +48,9 @@ Run from the repo folder (on Windows, use `python` instead of `python3`):
 
 | Command | What it does |
 |---|---|
-| `python3 review/cli.py list` / `rate last accepted` | see logged sessions, rate one (`accepted`, `edited`, `redone`) |
-| `python3 refine/refine.py cycle` | find patterns, draft new candidates, write a health report |
+| `python3 refine/refine.py auto-status` | automatic learning: on/off, spend vs budget, drafts waiting |
+| `python3 review/cli.py list` / `rate last accepted` | see sessions (`~` = inferred rating) and override a rating |
+| `python3 refine/refine.py cycle` | run detection and drafting yourself, right now |
 | `python3 review/cli.py proposals` | list drafts waiting for you |
 | `python3 review/cli.py review <name>` | evidence, code, safety scan and tests for one draft |
 | `python3 review/cli.py approve <name>` / `reject <name> --reason "..."` | install it (asks you to confirm) or drop it for good |

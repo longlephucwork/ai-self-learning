@@ -1,10 +1,10 @@
 {
   "key": "csv-to-json-conversion",
-  "label": "Convert a CSV file to a JSON array of objects",
-  "description": "Reads a CSV with a header row (optionally a non-default delimiter), writes a JSON array of objects keyed by header names, coerces numeric fields to numbers, and reports errors such as rows with extra cells. Some runs used an installed converter CLI.",
+  "label": "CSV to JSON conversion",
+  "description": "Convert a CSV file with a header row into a JSON array of objects keyed by header names, saved to a new file. Numeric values are sometimes stored as numbers. Some sessions use an installed converter CLI, and one hit an error on a row with extra cells.",
   "status": "installed",
   "n_sessions": 9,
-  "n_success": 6,
+  "n_success": 7,
   "success_outcomes": [
     "accepted",
     "edited"
@@ -12,7 +12,7 @@
   "min_success": 3,
   "deterministic_frac": 0.889,
   "suggested_type": "script",
-  "type_rationale": "Deterministic input-to-output transformation with a fixed schema. One CLI script with delimiter and numeric-typing options can cover all variants.",
+  "type_rationale": "Fully deterministic input-to-output transformation (CSV in, JSON out). A script with options for delimiter and numeric typing covers all variants without model judgment.",
   "session_ids": [
     "0f9ceaa7-0288-4500-8723-33b6cfee1d23",
     "28150c3c-9d9d-4ed1-86f7-8df303520181",
@@ -27,7 +27,7 @@
   "excluded_injection": [],
   "method": "claude",
   "created_at": "2026-11-03T03:52:05+00:00",
-  "updated_at": "2026-11-03T06:56:36+00:00",
+  "updated_at": "2026-11-03T09:09:04+00:00",
   "last_proposal": {
     "draft": "generated/csv-to-json-v2",
     "at": "2026-11-03T04:25:02+00:00",

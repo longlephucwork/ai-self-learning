@@ -67,6 +67,7 @@ PROPOSAL_SCHEMA = {
                 "expected_stdout": _s(20_000),
                 "stdout_compare": {"type": "string", "enum": ["exact", "json", "ignore"]},
                 "expected_files": {"type": "array", "maxItems": 5, "items": _efile},
+                "script": {"type": "string", "maxLength": 120},
             },
             "required": ["name", "source_session", "provenance", "rationale", "args", "stdin", "input_files",
                          "expected_exit", "expected_stdout", "stdout_compare", "expected_files"],
@@ -84,7 +85,10 @@ Artifact types:
 arguments from stdin (described by tool_input_schema_json, a JSON Schema with type=object) and prints \
 its result as text to stdout. Its tests pass the arguments JSON in "stdin", with "args": [].
   skill  = a SKILL.md with YAML frontmatter (name, description) holding only the judgment parts. It \
-calls bundled scripts (under scripts/) for anything exact.
+calls bundled scripts (under scripts/) for anything exact. Claude Code runs commands from the user's \
+project folder and shows "Base directory for this skill: <path>" when the skill loads, so in SKILL.md \
+refer to a bundled script as `<skill base directory>/scripts/<file>` and say that the base directory is \
+shown when the skill loads. Never use a bare relative `scripts/...` path in a command.
 Use the pattern's suggested type unless the evidence clearly contradicts it. If you deviate, explain \
 why in type_deviation_reason; otherwise leave it "".
 
@@ -112,7 +116,15 @@ the full session id.
 - For JSON output use compare="json" (structural equality). Use stdout_compare="ignore" unless stdout \
 is the actual output.
 - When the evidence is inconsistent (some sessions kept numbers as strings), follow the accepted \
-sessions and the user's feedback, and say so in the spec."""
+sessions and the user's feedback, and say so in the spec.
+
+SKILL TESTS: a skill's evidence comes from a separate judged check of SKILL.md against every accepted \
+session, so do NOT write tests for the skill itself. Write tests only for its bundled scripts: set \
+"script" to the script's path (e.g. "scripts/classify.py"). A bundled script's output is usually \
+intermediate data that never appears in the logs, so label those tests provenance="synthetic" (use \
+"logged" only if the exact expected output really appears in the session logs). A skill with no \
+bundled scripts has no tests. Make every rule in SKILL.md consistent with all accepted sessions and \
+with the users' rating notes."""
 
 
 def build_evidence(pattern: dict) -> str:
