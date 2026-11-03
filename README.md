@@ -41,7 +41,7 @@ python3 install.py --yes          # no questions; also: --no-hooks --no-mcp --no
 |---|---|---|
 | Linux | `unshare -rn` (user + network namespace) | Needs unprivileged user namespaces. Ubuntu 24.04+ restricts them via AppArmor; if the installer warns, allow them (`sudo sysctl kernel.apparmor_restrict_unprivileged_userns=0`) or add an AppArmor profile |
 | macOS | `sandbox-exec` with a deny-network profile | Built in; Apple marks it deprecated, but it still ships |
-| Windows | none | Code refuses to run unless you opt in (the installer asks; `--allow-unsandboxed`). For full isolation install inside **WSL** with `install.sh` |
+| Windows | none | Code refuses to run unless you opt in (the installer asks; `--allow-unsandboxed`). For full isolation install inside **WSL2** with `install.sh` ([WSL test](#testing-the-wsl-install)) |
 
 #### Testing the Linux install
 
@@ -200,7 +200,53 @@ python install.py --uninstall
 
 If a step fails, please open an issue with the output of steps 2–4 and 7, plus `[Environment]::OSVersion` and `py -3 --version`. The most likely trouble spots are the PATH update (step 5), how Claude Code on Windows runs hook commands (step 6), and user folders with spaces or non-ASCII characters in the name.
 
-**Full sandbox on Windows: use WSL.** Install Ubuntu with `wsl --install`, install Claude Code inside it, and run the Linux one-liner there. You get the `unshare` sandbox and every test runs.
+**Full sandbox on Windows: use WSL.** See [Testing the WSL install](#testing-the-wsl-install) below. You get the `unshare` sandbox and every test runs.
+
+#### Testing the WSL install
+
+WSL (Windows Subsystem for Linux) runs a real Linux, so this is the Linux install, plus a few WSL-specific checks. The installer detects WSL and prints `Linux (WSL2)` in its first line. It has unit tests for the WSL checks but hasn't been run on a real WSL machine yet.
+
+**1. WSL2, not WSL1.** In **PowerShell**, check that your distro's `VERSION` column says `2`:
+```powershell
+wsl -l -v
+```
+- If it says `1`, convert it: `wsl --set-version <distro> 2`. WSL1 has no network namespaces, so the sandbox can't work there, and the installer warns about it.
+- No distro yet? `wsl --install` (installs Ubuntu; reboot when asked).
+
+**Everything from here runs inside WSL**, in the Ubuntu (or other distro) terminal, not PowerShell.
+
+**2. Linux tools, not the Windows ones.** WSL puts Windows programs on its PATH, so check where each one comes from:
+```bash
+command -v python3 git claude
+```
+None of the three paths may start with `/mnt/`; those are the Windows programs. If `claude` is missing or under `/mnt/c/...`, install Claude Code inside WSL, the same way as on Linux. The installer refuses a Windows-side `claude` or Python: it would register the MCP server in the Windows config with Linux paths, and that can't work. Missing tools: `sudo apt install python3 git`.
+
+**3. The sandbox works.** This should print `0`:
+```bash
+unshare -rn true; echo $?
+```
+If it doesn't, see step 2 of the Linux section: Ubuntu 24.04's AppArmor restriction can apply in WSL too.
+
+**4. Install into the Linux filesystem.** Run the Linux one-liner from your WSL home folder:
+```bash
+cd ~ && curl -fsSL https://raw.githubusercontent.com/longlephucwork/claude-learning-harness/main/install.sh | bash
+```
+It clones to `~/claude-learning-harness`. Don't use a clone under `/mnt/c/...`: the Windows drive is slow from WSL, and file permissions misbehave there (the installer warns). Expected output:
+- a first line containing `Linux (WSL2)`
+- `[ok]` for Python, git and the Claude Code CLI
+- `[ok] code sandbox: unshare (network blocked ...)`
+- `[ok] self-test: OK`
+- `[ok]` for the hooks, the MCP server and the PATH
+
+**5. Then steps 4–9 of the Linux section.** Run them inside WSL, from `~/claude-learning-harness`: `install.py --check`, `claude mcp get learned` (from `~`), the PATH and wrapper, session logging, the tests (all run, nothing skipped), and uninstall.
+
+**6. Which Claude Code sees it.** The hooks and the MCP server are installed for the Claude Code that runs **inside WSL**:
+- in the WSL terminal: `claude`
+- in VS Code: open the folder with the **WSL** extension (*WSL: Connect to WSL*), so Claude Code runs in WSL
+
+A Claude Code started natively on Windows (PowerShell, or VS Code without WSL) uses the Windows config and won't log sessions or see the `learned` tools. That's expected. Use the Windows install for that, without a sandbox.
+
+If a step fails, please open an issue with the output of steps 1–4, plus `uname -r` (run inside WSL) and `wsl --version` (run in PowerShell).
 
 Resource limits (CPU, memory, file size) apply on Linux and macOS. The environment is scrubbed and there's a timeout everywhere. The static safety scan rejects network code on every OS.
 

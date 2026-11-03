@@ -148,6 +148,34 @@ class Installer(unittest.TestCase):
         self.assertEqual(env["USERPROFILE"], r"C:\tmp\box")
         self.assertNotIn("API_TOKEN", env)
 
+    def test_wsl_detection(self):
+        cases = {"5.15.153.1-microsoft-standard-WSL2\n": "WSL2", "6.6.36.6-microsoft-standard-WSL2+\n": "WSL2",
+                 "4.4.0-19041-Microsoft\n": "WSL1", "6.8.0-45-generic\n": None, "": None}
+        with mock.patch.object(install, "base_os", return_value="Linux"):
+            for rel, want in cases.items():
+                with mock.patch.object(install, "_osrelease", return_value=rel):
+                    self.assertEqual(install.wsl_version(), want, rel)
+                    self.assertEqual(install.os_name(), f"Linux ({want})" if want else "Linux")
+        with mock.patch.object(install, "base_os", return_value="macOS"), \
+                mock.patch.object(install, "_osrelease", return_value="microsoft"):
+            self.assertIsNone(install.wsl_version())
+
+    def test_wsl_rejects_windows_side_claude_and_warns_about_mnt(self):
+        out = io.StringIO()
+        with mock.patch.object(install, "wsl_version", return_value="WSL2"), \
+                mock.patch.object(install, "claude_bin", return_value="/mnt/c/Users/me/AppData/Roaming/npm/claude"), \
+                mock.patch.object(install, "REPO", Path("/mnt/c/Users/me/claude-learning-harness")), redirect_stdout(out):
+            good = install.check_prereqs()
+        self.assertFalse(good)
+        self.assertIn("resolves to the Windows Claude Code", out.getvalue())
+        self.assertIn("the repo is on the Windows drive", out.getvalue())
+        out = io.StringIO()
+        with mock.patch.object(install, "wsl_version", return_value="WSL1"), redirect_stdout(out):
+            self.assertTrue(install.check_prereqs())
+        self.assertIn("WSL1, which has no network namespaces", out.getvalue())
+        rc, out = self.run_main("--yes", "--skip-tests")                      # not WSL here: no WSL warnings
+        self.assertNotIn("WSL", out.replace("WSL gives", ""))
+
     def test_launchers_and_line_endings(self):
         self.assertTrue(os.access(ROOT / "install.sh", os.X_OK))
         self.assertNotIn(b"\r\n", (ROOT / "install.sh").read_bytes())

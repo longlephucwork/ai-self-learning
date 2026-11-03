@@ -80,9 +80,38 @@ def run(cmd, **kw) -> subprocess.CompletedProcess:
     return subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", **kw)
 
 
-def os_name() -> str:
+def base_os() -> str:
     return {"win32": "Windows", "darwin": "macOS"}.get(sys.platform, "Linux" if sys.platform.startswith("linux")
                                                        else sys.platform)
+
+
+def _osrelease() -> str:
+    for f in ("/proc/sys/kernel/osrelease", "/proc/version"):
+        try:
+            return Path(f).read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+    return ""
+
+
+def wsl_version() -> str | None:
+    """'WSL2', 'WSL1' or None. WSL2 kernels: '...-microsoft-standard-WSL2'; WSL1: '4.4.0-19041-Microsoft'."""
+    if base_os() != "Linux":
+        return None
+    rel = _osrelease().lower()
+    if "microsoft" not in rel:
+        return None
+    return "WSL2" if ("wsl2" in rel or "microsoft-standard" in rel) else "WSL1"
+
+
+def on_windows_drive(path: str | None) -> bool:
+    """Inside WSL, /mnt/<drive>/... is the Windows filesystem (and Windows programs on PATH live there)."""
+    return bool(path) and Path(path).as_posix().startswith("/mnt/")
+
+
+def os_name() -> str:
+    w = wsl_version()
+    return f"Linux ({w})" if w else base_os()
 
 
 # ---------------- 1. prerequisites ----------------
@@ -100,11 +129,25 @@ def check_prereqs() -> bool:
     else:
         fail("git not found (needed: approvals commit every learned change)")
         good = False
-    if claude_bin():
+    wsl = wsl_version()
+    if wsl and on_windows_drive(python_exe()):
+        fail(f"Python {python_exe()} is the Windows one; install Python inside WSL (sudo apt install python3)")
+        good = False
+    if wsl and on_windows_drive(claude_bin()):
+        fail(f"`claude` resolves to the Windows Claude Code ({claude_bin()}). Install Claude Code inside WSL, "
+             "otherwise the MCP server would be registered in the Windows config with Linux paths")
+        good = False
+    elif claude_bin():
         r = run([claude_bin(), "--version"])
         ok(f"Claude Code CLI found ({(r.stdout or r.stderr).strip()[:60]})")
     else:
         warn("`claude` CLI not found: hooks and the MCP server need Claude Code; install it, then re-run")
+    if wsl == "WSL1":
+        warn("this distro runs on WSL1, which has no network namespaces, so the code sandbox can't work; "
+             "convert it in PowerShell: wsl --set-version <distro> 2")
+    if wsl and on_windows_drive(str(REPO)):
+        warn(f"the repo is on the Windows drive ({REPO}): slow, and file permissions misbehave there. "
+             "Clone it inside WSL instead (the default: ~/claude-learning-harness)")
     return good
 
 
@@ -126,7 +169,9 @@ def sandbox_status(ui: UI, allow_flag: bool, dry: bool = False) -> None:
         return
     hint = {"Linux": "unprivileged user namespaces are off (Ubuntu 24.04+: see README > Installation)",
             "Windows": "native Windows has no equivalent; WSL gives you the Linux sandbox",
-            "macOS": "sandbox-exec is missing or blocked"}.get(os_name(), "")
+            "macOS": "sandbox-exec is missing or blocked"}.get(base_os(), "")
+    if wsl_version() == "WSL1":
+        hint = "WSL1 has no network namespaces; convert the distro to WSL2 (wsl --set-version <distro> 2)"
     warn(f"no code sandbox on this system: {hint}")
     if sandbox.allow_unsandboxed():
         warn("you previously allowed running generated code and tools WITHOUT network isolation")
