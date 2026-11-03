@@ -34,7 +34,9 @@ from harness_lib import tools as rt  # noqa: E402
 from registry import install as reg  # noqa: E402
 
 SUPPORTED_VERSIONS = ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"]  # newest first
-SERVER_INFO = {"name": "learning-harness", "title": "Learned tools", "version": "1.0.0"}
+from harness_lib.update import current_version  # noqa: E402
+
+SERVER_INFO = {"name": "learning-harness", "title": "Learned tools", "version": current_version()}
 INSTRUCTIONS = ("Tools learned from this user's past Claude Code sessions and explicitly approved by them. "
                 "Each one does one job deterministically; prefer it over redoing that job by hand.")
 POLL_S = 3.0
