@@ -1,35 +1,6 @@
 {
   "format_version": 1,
-  "installed": {
-    "release-notes-generation": {
-      "name": "release-notes-generation",
-      "type": "skill",
-      "pattern_key": "release-notes-generation",
-      "version": 1,
-      "path": "skills/release-notes-generation",
-      "entrypoint": "SKILL.md",
-      "symlink": "/root/.claude/skills/release-notes-generation",
-      "description": "Write user-facing RELEASE_NOTES.md for the changes since the last git tag, grouped by security, features, improvements, fixes and docs, omitting internal-only changes.",
-      "files": {
-        "SKILL.md": "5b060cf536a7b416",
-        "scripts/classify_commits.py": "1c91cab265a702d2"
-      },
-      "evidence": {
-        "n_sessions": 3,
-        "n_success": 3,
-        "sessions": [
-          "2d3c95ad-8f8a-4c2d-a45a-21a3152b6351",
-          "661a0670-6993-4e52-9fca-ba8d2485f9d1",
-          "ff8a9666-346e-4f83-be2f-f2d25278a687"
-        ]
-      },
-      "tests_passed": 4,
-      "tests_total": 4,
-      "approved_at": "2026-11-03T09:15:17+00:00",
-      "approval_note": "approved by the user in chat",
-      "draft": "generated/release-notes-generation"
-    }
-  },
+  "installed": {},
   "history": [
     {
       "event": "install",
@@ -83,6 +54,13 @@
     {
       "event": "uninstall",
       "name": "meeting-notes-summarization",
+      "version": 1,
+      "at": "2026-11-03T10:48:51+00:00",
+      "note": "demo item; the public repo ships no learned items"
+    },
+    {
+      "event": "uninstall",
+      "name": "release-notes-generation",
       "version": 1,
       "at": "2026-11-03T10:48:51+00:00",
       "note": "demo item; the public repo ships no learned items"
