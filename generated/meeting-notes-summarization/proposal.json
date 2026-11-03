@@ -2,7 +2,7 @@
   "name": "meeting-notes-summarization",
   "type": "skill",
   "pattern_key": "meeting-notes-summarization",
-  "status": "validated",
+  "status": "installed",
   "description": "Turn a plain-text meeting transcript, standup log, or retro notes into a markdown NOTES.md with attendees, decisions, action items table (Owner, Due), and open questions.",
   "spec": "Skill that converts a meeting transcript into NOTES.md. Judgment-only; no bundled scripts, so no tests. Rules follow accepted sessions and the user's edit note: action items in a table with Owner and Due columns; open questions in a separate section at the end.",
   "type_deviation_reason": "",
@@ -30,5 +30,10 @@
     }
   ],
   "created_at": "2026-11-03T09:09:44+00:00",
-  "cost_usd": 0.0445
+  "cost_usd": 0.0445,
+  "decision": {
+    "decision": "approved",
+    "at": "2026-11-03T09:15:17+00:00",
+    "note": "approved by the user in chat"
+  }
 }

@@ -2,7 +2,7 @@
   "key": "meeting-notes-summarization",
   "label": "Meeting transcript to structured notes",
   "description": "Turn a plain-text meeting transcript, standup log, or retro notes into a markdown file with attendees, decisions, action items with owners and deadlines, and open questions.",
-  "status": "proposed",
+  "status": "installed",
   "n_sessions": 3,
   "n_success": 3,
   "success_outcomes": [
@@ -27,5 +27,10 @@
     "at": "2026-11-03T09:09:44+00:00",
     "passed": true
   },
-  "proposal": "generated/meeting-notes-summarization"
+  "proposal": "generated/meeting-notes-summarization",
+  "installed": {
+    "name": "meeting-notes-summarization",
+    "version": 1,
+    "at": "2026-11-03T09:15:17+00:00"
+  }
 }

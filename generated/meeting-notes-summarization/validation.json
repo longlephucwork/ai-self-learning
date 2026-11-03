@@ -1,5 +1,5 @@
 {
-  "validated_at": "2026-11-03T09:09:16+00:00",
+  "validated_at": "2026-11-03T09:15:17+00:00",
   "network_isolated": true,
   "tests": [],
   "provenance": [],
@@ -48,7 +48,7 @@
       ],
       "reason": "The skill's rules match the accepted output: same structure, table-form action items with Owner/Action/Due, tentative marking, decisions including the 'not now' one, and a one-line reply. Open questions is correctly omitted when none exist. Differences, such as resolving Thursday to a calendar date, are minor.",
       "cost_usd": 0.0279,
-      "cached": false
+      "cached": true
     },
     {
       "session_id": "ceccc598-36a3-4791-bd64-5991fb0f3375",
@@ -93,7 +93,7 @@
       ],
       "reason": "Following the skill gives NOTES.md with an Owner/Due action table and Open questions as the last section. That is what the user asked for and accepted. The skill's weekday-checking rule also prevents the Friday 7 Nov error that was fixed in the session. Its example column order differs slightly from the accepted file, but the user didn't specify an order, so this is not a failure.",
       "cost_usd": 0.03,
-      "cached": false
+      "cached": true
     },
     {
       "session_id": "d24589af-398b-4bf3-b234-15aaf8bc02c6",
@@ -108,7 +108,7 @@
         }
       ],
       "cost_usd": 0.0185,
-      "cached": false
+      "cached": true
     }
   ],
   "passed": true,
