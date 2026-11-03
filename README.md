@@ -43,6 +43,68 @@ python3 install.py --yes          # no questions; also: --no-hooks --no-mcp --no
 | macOS | `sandbox-exec` with a deny-network profile | Built in; Apple marks it deprecated, but it still ships |
 | Windows | none | Code refuses to run unless you opt in (the installer asks; `--allow-unsandboxed`). For full isolation install inside **WSL** with `install.sh` |
 
+#### Testing the Linux install
+
+This is the reference platform: these steps have been run on Linux, and every test runs here. To check your machine, open a terminal; run the commands from the repo folder (`~/claude-learning-harness`) unless noted.
+
+**1. Prerequisites.** Each should print a version, and Python must be 3.10+:
+```bash
+python3 --version; git --version; claude --version
+```
+
+**2. The sandbox works for your user.** This should print `0`:
+```bash
+unshare -rn true; echo $?
+```
+If it fails (`Operation not permitted`), unprivileged user namespaces are disabled:
+- **Ubuntu 23.10+ / 24.04+** (AppArmor restriction): `sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0`. To keep it across reboots: `echo 'kernel.apparmor_restrict_unprivileged_userns=0' | sudo tee /etc/sysctl.d/60-userns.conf`
+- **Older Debian kernels**: `sudo sysctl -w kernel.unprivileged_userns_clone=1`
+- **Inside Docker or another container**: the container's seccomp profile usually blocks it. Run the harness on the host, or start the container with user namespaces allowed.
+
+Without it the installer still works, but validation and MCP tools refuse to run code unless you opt in.
+
+**3. Run the installer.** Run `./install.sh`, or the `curl ... | bash` one-liner above. Expected:
+- `[ok]` for Python, git and the Claude Code CLI
+- `[ok] code sandbox: unshare (network blocked for generated code and tools)`
+- `[ok] self-test: OK`
+- `[ok]` for the hooks (`~/.claude/settings.json`), the MCP server, and the PATH (`~/.bashrc`, `~/.zshrc`, `~/.config/fish/config.fish` or `~/.profile`, depending on `$SHELL`)
+
+**4. Status.** Open a **new** terminal first (or `source` your rc file). Expect `[ok]` for everything, including the sandbox, `hooks installed`, `MCP server `learned` registered` and `bin/ on PATH`:
+```bash
+python3 install.py --check
+```
+
+**5. MCP server.** Run this outside the repo folder, so the repo's own `.mcp.json` doesn't answer instead. Expect `Scope: User config (available in all your projects)`, `Status: √ Connected` and your Python as the command:
+```bash
+cd ~ && claude mcp get learned
+```
+
+**6. PATH and the script wrapper.** Expect `.../claude-learning-harness/bin/csv-to-json`, the `usage: csv_to_json.py ...` line, and your Python's path:
+```bash
+command -v csv-to-json
+csv-to-json --help
+echo "$LEARNING_HARNESS_PYTHON"
+```
+
+**7. Session logging.** Start `claude` in any folder, send one message, then exit (`/exit`). Back in the repo folder, the session should appear at the top:
+```bash
+python3 review/cli.py list -n 3
+```
+If it doesn't, check the hook command in `~/.claude/settings.json` (the quoted Python path followed by the quoted `hooks/log_session.py` path) and `store/hook_errors.log`.
+
+**8. Tests.** Every test runs on Linux, nothing is skipped, and they take about 25 seconds:
+```bash
+python3 -m unittest tests.test_sandbox -v      # 8 tests, starts with: platform=linux backend=unshare
+python3 -m unittest discover -s tests -t .     # the full suite
+```
+
+**9. Uninstall.** Expect `[ok]` lines for removing the hooks, the MCP server and the PATH block from your rc file:
+```bash
+python3 install.py --uninstall
+```
+
+If a step fails, please open an issue with the output of steps 2–4 and 8, plus `cat /etc/os-release | head -3` and `uname -r`.
+
 #### Testing the macOS sandbox
 
 The macOS sandbox (`sandbox-exec` with the profile `(version 1)(allow default)(deny network*)`) is covered by unit tests but hasn't been run on a real Mac yet. To check it on yours, run from the repo folder:

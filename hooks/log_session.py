@@ -103,6 +103,10 @@ def hook_main() -> int:
     if not tp:
         _log_error(f"no transcript_path in {event} payload")
         return 0
+    if not os.path.isfile(os.path.expanduser(tp)):
+        # Claude Code also fires SessionEnd for CLI subcommands (`claude mcp add`, `claude --version`, ...)
+        # that never write a transcript: nothing to log, and not an error.
+        return 0
     ingest(tp, hook_event=event,
            end_reason=payload.get("reason") if event == "SessionEnd" else None,
            session_id=payload.get("session_id"),

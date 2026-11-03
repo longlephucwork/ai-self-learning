@@ -154,6 +154,16 @@ class Phase1(unittest.TestCase):
         self._hook({"transcript_path": str(FIX), "hook_event_name": "Stop", "stop_hook_active": True})
         self.assertEqual(store.iter_sessions(), [])
 
+    def test_missing_transcript_is_silently_skipped(self):
+        from harness_lib import store
+        self._hook({"session_id": "cli-subcommand", "hook_event_name": "SessionEnd", "reason": "other",
+                    "transcript_path": str(Path(self.tmp.name) / "never-written.jsonl")})
+        self.assertEqual(store.iter_sessions(), [])
+        self.assertFalse((Path(self.tmp.name) / "hook_errors.log").exists())
+        from hooks import log_session
+        with self.assertRaises(FileNotFoundError):          # a wrong path given by hand is still an error
+            log_session.ingest(str(Path(self.tmp.name) / "typo.jsonl"))
+
     def test_bad_session_id_rejected(self):
         from harness_lib import store
         for bad in ("../etc", "a/b", ".hidden", ""):
