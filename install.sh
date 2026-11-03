@@ -10,7 +10,7 @@
 # (default ~/claude-learning-harness).
 set -euo pipefail
 
-REPO_URL="https://github.com/longlephucwork/claude-learning-harness.git"
+REPO_URL="${LEARNING_HARNESS_REPO_URL:-https://github.com/longlephucwork/claude-learning-harness.git}"   # override for forks
 
 find_python() {
   for c in python3 python3.13 python3.12 python3.11 python3.10 python; do
@@ -43,14 +43,19 @@ else
   command -v git >/dev/null 2>&1 || { echo "error: git not found" >&2; exit 1; }
   repo="${LEARNING_HARNESS_DIR:-$HOME/claude-learning-harness}"
   if [ -d "$repo/.git" ]; then
-    echo "updating existing clone in $repo"
-    git -C "$repo" pull --ff-only
+    echo "already installed in $repo (re-running the installer; to get a new release: python3 install.py --update)"
   elif [ -e "$repo" ]; then
     echo "error: $repo exists but is not a git clone; set LEARNING_HARNESS_DIR to another folder" >&2
     exit 1
   else
     echo "cloning into $repo"
     git clone "$REPO_URL" "$repo"
+    # start from the newest release (vX.Y.Z tag on main), not whatever is on main right now
+    latest="$(git -C "$repo" tag --merged origin/main --list 'v[0-9]*' --sort=-v:refname | head -n 1)"
+    if [ -n "$latest" ]; then
+      echo "using release $latest"
+      git -C "$repo" reset --quiet --hard "$latest"
+    fi
   fi
 fi
 

@@ -121,6 +121,19 @@ class Installer(unittest.TestCase):
         self.assertFalse(auto.config()["enabled"])
         self.assertIn("automatic learning off", out)
 
+    def test_update_check_step(self):
+        from harness_lib import update
+        rc, out = self.run_main("--yes", "--skip-tests", "--no-mcp", "--no-path", "--no-auto")
+        self.assertTrue(update.config()["check"])
+        self.assertIn("daily update check on", out)
+        rc, out = self.run_main("--check")
+        self.assertIn(f"version {update.current_version()}; daily update check on", out)
+        rc, out = self.run_main("--yes", "--skip-tests", "--no-mcp", "--no-path", "--no-auto", "--no-update-check")
+        self.assertFalse(update.config()["check"])
+        update.set_config(check=True)
+        rc, out = self.run_main("--uninstall", "--yes")
+        self.assertFalse(update.config()["check"])
+
     def test_opt_outs(self):
         rc, out = self.run_main("--yes", "--skip-tests", "--no-hooks", "--no-mcp", "--no-path")
         self.assertEqual(rc, 0)

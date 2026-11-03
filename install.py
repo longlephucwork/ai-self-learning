@@ -8,6 +8,9 @@ which find a suitable Python and clone the repo first. Run directly:
   python3 install.py --yes           accept the defaults without asking
   python3 install.py --check         show what is installed; change nothing
   python3 install.py --uninstall     undo everything this installer did (keeps the repo and your data)
+  python3 install.py --update        install the newest release (vX.Y.Z tag), keeping your learned items
+  python3 install.py --rollback      go back to the version before the last update
+  python3 install.py --check-update  look for a newer release (what the daily background check runs)
 
 Options: --no-hooks  --no-mcp  --no-path  --skip-tests  --allow-unsandboxed
 
@@ -354,6 +357,80 @@ def path_installed() -> bool:
     return rc.exists() and MARK_BEGIN in rc.read_text(encoding="utf-8")
 
 
+# ---------------- updates ----------------
+
+def _upd():
+    sys.path.insert(0, str(REPO))
+    from harness_lib import update
+    return update
+
+
+def version() -> str:
+    return _upd().current_version(REPO)
+
+
+def update_cfg() -> dict:
+    return _upd().config()
+
+
+def update_status() -> None:
+    u = _upd()
+    st = u.state()
+    on = u.config().get("check")
+    (ok if on else warn)(f"version {version()}; daily update check {'on' if on else 'off'}"
+                         + (f"; last checked {st['checked_at'][:16]}" if st.get("checked_at") else ""))
+    if st.get("available"):
+        ok(f"update available: {st['latest']}  ->  python3 install.py --update")
+
+
+def _self_test(repo):
+    r = run([sys.executable, "-m", "unittest", "-q", "tests.test_phase1", "tests.test_phase2"], cwd=repo)
+    return r.returncode == 0, (r.stdout + r.stderr)
+
+
+def _refresh_after_update(repo):
+    """New releases may add hooks; re-apply the user-scope hooks if they're installed (same Python)."""
+    if hooks_installed():
+        run([sys.executable, str(repo / "hooks" / "install_hooks.py"), "--scope", "user", "--python", python_exe()])
+
+
+def update_cmd(a, ui) -> int:
+    u = _upd()
+    try:
+        if a.check_update:
+            st = u.check(REPO)
+            say(f"{store_now()} installed {st['current']}; latest release {st.get('latest') or '(none)'}"
+                + ("; update available" if st["available"] else "; up to date"))
+            return 0
+        if a.rollback:
+            if not ui.ask(f"Go back to {u.state().get('previous_version', 'the previous version')}?"):
+                say("cancelled"); return 1
+            r = u.rollback(REPO)
+            ok(f"rolled back to {r['version']}")
+            _refresh_after_update(REPO)
+            return 0
+        st = u.check(REPO)
+        if not st["available"]:
+            ok(f"already up to date ({st['current']})")
+            return 0
+        say(f"learning-harness {st['latest']} is available (installed: {st['current']}).")
+        say("\n".join("  " + l for l in (st.get("notes") or "(no release notes)").splitlines()[:20]))
+        if not ui.ask(f"Update to {st['latest']}? Your learned items are kept; it self-tests and undoes itself on failure."):
+            say("cancelled; nothing changed"); return 1
+        r = u.apply(REPO, tag=st["latest"], self_test=_self_test, after_merge=_refresh_after_update)
+        ok(f"updated {r['from']} -> {r['to']} (undo: python3 install.py --rollback)")
+        return 0
+    except u.UpdateError as e:
+        fail(str(e))
+        return 1
+
+
+def store_now() -> str:
+    sys.path.insert(0, str(REPO))
+    from harness_lib import store
+    return store.now()
+
+
 # ---------------- automatic learning ----------------
 
 def auto_config() -> dict:
@@ -403,6 +480,10 @@ def main(argv=None) -> int:
     ap.add_argument("--no-mcp", action="store_true")
     ap.add_argument("--no-path", action="store_true")
     ap.add_argument("--skip-tests", action="store_true")
+    ap.add_argument("--update", action="store_true", help="install the newest release")
+    ap.add_argument("--rollback", action="store_true", help="undo the last update")
+    ap.add_argument("--check-update", action="store_true", help="look for a newer release; change nothing")
+    ap.add_argument("--no-update-check", action="store_true", help="don't check for new releases daily")
     ap.add_argument("--no-auto", action="store_true", help="don't enable automatic learning")
     ap.add_argument("--budget", type=float, default=None, help="monthly budget for automatic learning (USD, default 5)")
     ap.add_argument("--allow-unsandboxed", action="store_true",
@@ -410,7 +491,9 @@ def main(argv=None) -> int:
     a = ap.parse_args(argv)
     ui = UI(a.yes)
 
-    say(f"learning-harness installer: {os_name()}, repo at {REPO}")
+    if a.check_update or a.update or a.rollback:
+        return update_cmd(a, ui)
+    say(f"learning-harness installer: {os_name()}, version {version()}, repo at {REPO}")
     if a.check:
         say("\nstatus:")
         check_prereqs()
@@ -419,6 +502,7 @@ def main(argv=None) -> int:
         (ok if mcp_installed() else warn)(f"MCP server `learned` {'registered' if mcp_installed() else 'not registered'}")
         (ok if path_installed() else warn)(f"bin/ {'on' if path_installed() else 'not on'} PATH")
         auto_status()
+        update_status()
         return 0
 
     if a.uninstall:
@@ -429,6 +513,9 @@ def main(argv=None) -> int:
             setup_mcp(uninstall=True)
         if not a.no_auto and auto_enabled() and ui.ask("Turn off automatic learning?"):
             setup_auto(enable=False)
+        if update_cfg().get("check") and ui.ask("Stop checking for new releases?"):
+            _upd().set_config(check=False)
+            ok("daily update check off")
         if not a.no_path and ui.ask("Remove bin/ from PATH?"):
             setup_path(uninstall=True)
         say(f"\ndone. To delete everything else: remove {REPO}")
@@ -467,7 +554,16 @@ def main(argv=None) -> int:
         setup_auto(enable=True, budget=budget)
     else:
         setup_auto(enable=False)
-    say("\n7. PATH")
+    say("\n7. updates")
+    if a.no_update_check:
+        say("  skipped (--no-update-check)")
+        _upd().set_config(check=False)
+    elif ui.ask("Check for new releases once a day? (Claude asks you before updating; nothing updates by itself)"):
+        _upd().set_config(check=True)
+        ok("daily update check on: Claude will tell you when a new release is out")
+    else:
+        _upd().set_config(check=False)
+    say("\n8. PATH")
     if a.no_path:
         say("  skipped (--no-path)")
     elif ui.ask("Add bin/ (wrappers for installed scripts) to your PATH?"):

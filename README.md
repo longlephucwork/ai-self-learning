@@ -40,10 +40,20 @@ You can also do it all by hand. Run these from `~/claude-learning-harness` (on W
 | `python3 registry/install.py list` | what's installed |
 | `python3 registry/install.py uninstall <name>` | remove an installed item |
 
+## Updates
+
+Once a day the harness checks GitHub for a new release. When there is one, Claude tells you what changed and asks whether to update. Your learned items are kept. You can also update yourself:
+
+```bash
+python3 install.py --update      # install the newest release
+python3 install.py --rollback    # go back to the previous version
+```
+
 ## Turn it off or remove it
 
 - Stop automatic learning: set `"enabled": false` under `"auto"` in `store/config.json`.
 - Uninstall: `python3 install.py --uninstall`. This removes the hooks, the MCP server and the PATH entry, and keeps your data.
+- Stop the update check: set `"check": false` under `"update"` in `store/config.json`.
 - Status: `python3 install.py --check`.
 
 Your sessions stay on your machine, in `store/`, which only you can read and which is never committed. Each learned item is a git commit, so you can always revert it.

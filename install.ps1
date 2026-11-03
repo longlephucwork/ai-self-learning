@@ -10,7 +10,7 @@
 # Note: native Windows has no network sandbox for generated code, so the installer will ask whether to
 # allow running learned tools without one. For full isolation, install inside WSL with install.sh instead.
 
-$RepoUrl = "https://github.com/longlephucwork/claude-learning-harness.git"
+$RepoUrl = if ($env:LEARNING_HARNESS_REPO_URL) { $env:LEARNING_HARNESS_REPO_URL } else { "https://github.com/longlephucwork/claude-learning-harness.git" }  # override for forks
 
 $py = $null
 foreach ($cand in @("py -3", "python", "python3")) {
@@ -36,14 +36,20 @@ if ($here -and (Test-Path (Join-Path $here "install.py"))) {
     }
     $repo = if ($env:LEARNING_HARNESS_DIR) { $env:LEARNING_HARNESS_DIR } else { Join-Path $env:USERPROFILE "claude-learning-harness" }
     if (Test-Path (Join-Path $repo ".git")) {
-        Write-Host "updating existing clone in $repo"
-        git -C $repo pull --ff-only
+        Write-Host "already installed in $repo (re-running the installer; to get a new release: python install.py --update)"
     } elseif (Test-Path $repo) {
         Write-Host "error: $repo exists but is not a git clone; set LEARNING_HARNESS_DIR to another folder" -ForegroundColor Red
         exit 1
     } else {
         Write-Host "cloning into $repo"
         git clone $RepoUrl $repo
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        # start from the newest release (vX.Y.Z tag on main), not whatever is on main right now
+        $latest = git -C $repo tag --merged origin/main --list "v[0-9]*" --sort=-v:refname | Select-Object -First 1
+        if ($latest) {
+            Write-Host "using release $latest"
+            git -C $repo reset --quiet --hard $latest
+        }
     }
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 }

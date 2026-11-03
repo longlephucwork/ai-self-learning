@@ -241,3 +241,26 @@ python3 refine/refine.py auto-status     # on/off, spend vs budget, next run, dr
 python3 refine/refine.py auto --force    # run now, ignoring the throttle
 tail store/auto.log                      # what the background runs did
 ```
+
+## Updates (`harness_lib/update.py`)
+
+A **release** is an annotated git tag `vMAJOR.MINOR.PATCH` on `main`. The `VERSION` file in the repo says which version you have. Nothing updates by itself:
+
+1. **Check.** At most once a day (`"update": {"check": true, "interval_hours": 24}` in `store/config.json`; the installer asks), the `SessionEnd` hook starts a detached `install.py --check-update`. It runs `git fetch --tags` and records whether a newer release exists in `store/update_state.json`. That's plain git, with no model call and no GitHub API.
+2. **Ask.** The `SessionStart` hook tells Claude, once per version, that the release is available, with its release notes (the tag's message). Claude asks you, and runs `install.py --update --yes` only after your explicit yes.
+3. **Apply** (`install.py --update`):
+   - Only tags matching `vX.Y.Z` that are reachable from `origin/main` count, so a stray tag on another branch is never offered.
+   - Your working tree must be clean; uncommitted edits are never touched.
+   - The release is **merged** into your clone, so your `learned: ...` commits stay. A conflict aborts the merge and leaves everything as it was.
+   - A self-test runs on the new version; if it fails, the update is undone automatically.
+   - The session hooks are refreshed, in case the release changed them.
+4. **Roll back** with `install.py --rollback`. This works only if nothing was committed since the update; otherwise it shows the `git revert` command to run.
+
+A fresh install starts at the newest release, not at whatever is on `main` (or on `main` if there are no releases yet). For a fork, set `LEARNING_HARNESS_REPO_URL` before running the installer.
+
+**Publishing a release** (maintainers):
+```bash
+echo "1.1.0" > VERSION && git commit -am "Release 1.1.0"
+git tag -a v1.1.0 -m "What changed, in a few lines (shown to users)"
+git push origin main v1.1.0
+```

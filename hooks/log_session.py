@@ -116,20 +116,35 @@ def hook_main() -> int:
            last_assistant_message=payload.get("last_assistant_message"))
     if event == "SessionEnd":
         maybe_start_auto()
+        maybe_check_update()
     return 0
 
 
 def session_start() -> int:
     """Tell Claude about validated drafts waiting for the user (local file reads only; no model call)."""
-    try:
-        from refine import auto
-        text = auto.session_start_context()
-    except Exception:
-        _log_error(traceback.format_exc().replace("\n", " | "))
-        return 0
+    parts = []
+    for name in ("refine.auto", "harness_lib.update"):
+        try:
+            mod = __import__(name, fromlist=["session_start_context"])
+            t = mod.session_start_context()
+            if t:
+                parts.append(t)
+        except Exception:
+            _log_error(traceback.format_exc().replace("\n", " | "))
+    text = "\n\n".join(parts)
     if text:
         print(json.dumps({"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": text}}))
     return 0
+
+
+def maybe_check_update() -> None:
+    """At most once per interval, look for a new release in the background (git fetch; no model calls)."""
+    try:
+        from harness_lib import update
+        if update.due():
+            update.spawn_check_in_background()
+    except Exception:
+        _log_error(traceback.format_exc().replace("\n", " | "))
 
 
 def maybe_start_auto() -> None:
