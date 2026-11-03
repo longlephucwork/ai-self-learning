@@ -193,7 +193,8 @@ class Phase3(unittest.TestCase):
 
     def test_sandbox_blocks_network_and_scrubs_env(self):
         from validate.replay import netns_available, run_test
-        self.assertTrue(netns_available())
+        if not netns_available():
+            self.skipTest("no network sandbox on this OS")
         os.environ["SECRET_TOKEN_FOR_TEST"] = "sk-should-not-leak-123456"
         probe = ("import socket, os, json\n"
                  "try:\n    socket.create_connection(('1.1.1.1', 53), timeout=3); net='open'\n"
@@ -204,12 +205,14 @@ class Phase3(unittest.TestCase):
         out = json.loads(r["stdout"])
         self.assertEqual(out["net"], "blocked")
         self.assertNotIn("SECRET_TOKEN_FOR_TEST", out["env"])
-        self.assertTrue(set(out["env"]) <= {"PATH", "LANG", "HOME", "PYTHONDONTWRITEBYTECODE", "LC_CTYPE"}, out["env"])
+        self.assertTrue(set(out["env"]) <= {"PATH", "LANG", "HOME", "PYTHONDONTWRITEBYTECODE", "LC_CTYPE",
+                                         "__CF_USER_TEXT_ENCODING"}, out["env"])  # macOS adds the last one
 
     def test_sandbox_limits(self):
         from validate.replay import run_test
-        r = run_test({"hog.py": "x = ' ' * (2 * 1024**3)\n"}, "hog.py", {"name": "mem", "args": []}, netns=True)
-        self.assertNotEqual(r["exit"], 0)          # 512MB address-space cap
+        if sys.platform.startswith("linux"):       # macOS doesn't enforce RLIMIT_AS; Windows has no rlimits
+            r = run_test({"hog.py": "x = ' ' * (2 * 1024**3)\n"}, "hog.py", {"name": "mem", "args": []}, netns=True)
+            self.assertNotEqual(r["exit"], 0)      # 512MB address-space cap
         r = run_test({"w.py": "open('/tmp/../' + 'x', 'w')\n"}, "w.py", {"name": "x", "args": []}, netns=True)
         self.assertIsInstance(r["exit"], int)       # runs, contained; scan is what flags abs paths
 

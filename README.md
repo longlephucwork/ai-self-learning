@@ -43,6 +43,46 @@ python3 install.py --yes          # no questions; also: --no-hooks --no-mcp --no
 | macOS | `sandbox-exec` with a deny-network profile | Built in; Apple marks it deprecated, but it still ships |
 | Windows | none | Code refuses to run unless you opt in (the installer asks; `--allow-unsandboxed`). For full isolation install inside **WSL** with `install.sh` |
 
+#### Testing the macOS sandbox
+
+The macOS sandbox (`sandbox-exec` with the profile `(version 1)(allow default)(deny network*)`) is covered by unit tests but hasn't been run on a real Mac yet. To check it on yours, run from the repo folder:
+
+**1. The sandbox tool exists and accepts the profile.** This should print `0`:
+```bash
+sandbox-exec -p '(version 1)(allow default)(deny network*)' /usr/bin/true; echo $?
+```
+
+**2. It blocks the network, and only inside the sandbox.** Run the same connection without the sandbox first, so a Mac that is simply offline can't look like a pass:
+```bash
+python3 -c "import socket; socket.create_connection(('1.1.1.1', 53), timeout=3); print('open')"
+sandbox-exec -p '(version 1)(allow default)(deny network*)' \
+  python3 -c "import socket; socket.create_connection(('1.1.1.1', 53), timeout=3); print('open')"
+```
+Expected: the first prints `open`; the second fails with `PermissionError` / `Operation not permitted` (or another `OSError`) instead of printing `open`.
+
+**3. The harness picks it up.** Expected output includes `code sandbox: sandbox-exec (network blocked for generated code and tools)`:
+```bash
+python3 install.py --check
+```
+
+**4. The sandbox test suite passes.** All 8 tests should pass, including `platform=darwin backend=sandbox-exec`:
+```bash
+python3 -m unittest tests.test_sandbox -v
+```
+It checks that, inside the sandbox:
+- outbound TCP and DNS are blocked
+- files can still be written in the working folder (tools need this)
+- secret environment variables don't leak in
+- the CPU limit stops a runaway loop
+- an MCP tool call runs inside the sandbox
+
+**5. Optional: the full suite.** On macOS the memory-limit check is skipped, because macOS doesn't enforce `RLIMIT_AS`:
+```bash
+python3 -m unittest discover -s tests -t .
+```
+
+If a step fails, please open an issue with the output of steps 1–4 and `sw_vers`. The most likely differences on some macOS versions are DNS (`test_dns_is_blocked`) and an extra environment variable (`test_environment_is_scrubbed`).
+
 Resource limits (CPU, memory, file size) apply on Linux and macOS. The environment is scrubbed and there's a timeout everywhere. The static safety scan rejects network code on every OS.
 
 **Your data stays local.** `store/` (sessions, ratings, usage) is git-ignored, so a fresh install starts with an empty store. Learned artifacts (`scripts/`, `mcp_tools/tools/`, `registry.json`, `patterns/`, `generated/`) are in git and come with the clone.
