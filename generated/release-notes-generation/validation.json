@@ -1,0 +1,42 @@
+{
+  "validated_at": "2026-11-03T06:58:12+00:00",
+  "network_isolated": true,
+  "tests": [],
+  "provenance": [
+    {
+      "name": "weather-cli commits",
+      "provenance": "derived_from_feedback",
+      "problems": [
+        "derived_from_feedback but session 2d3c95ad has no rating note"
+      ]
+    },
+    {
+      "name": "todo-api commits with security fix",
+      "provenance": "derived_from_feedback",
+      "problems": []
+    },
+    {
+      "name": "photo-sorter free-form commits",
+      "provenance": "derived_from_feedback",
+      "problems": [
+        "derived_from_feedback but session ff8a9666 has no rating note"
+      ]
+    },
+    {
+      "name": "missing input file",
+      "provenance": "synthetic",
+      "problems": []
+    }
+  ],
+  "coverage": {
+    "successful_sessions": 3,
+    "covered": 3,
+    "required": 3
+  },
+  "passed": false,
+  "problems": [
+    "[weather-cli commits] derived_from_feedback but session 2d3c95ad has no rating note",
+    "[photo-sorter free-form commits] derived_from_feedback but session ff8a9666 has no rating note"
+  ],
+  "fingerprint": "ce0816654699d78c"
+}

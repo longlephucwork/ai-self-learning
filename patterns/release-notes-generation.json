@@ -1,0 +1,30 @@
+{
+  "key": "release-notes-generation",
+  "label": "Draft user-facing release notes since last tag",
+  "description": "Reads git history since the previous release tag plus changelog/README, filters out internal-only changes, and writes a markdown release notes file grouped into features and fixes sections.",
+  "status": "candidate",
+  "n_sessions": 3,
+  "n_success": 3,
+  "success_outcomes": [
+    "accepted",
+    "edited"
+  ],
+  "min_success": 3,
+  "deterministic_frac": 0.0,
+  "suggested_type": "skill",
+  "type_rationale": "Deciding which changes are user-facing and writing readable prose requires judgment. A skill can call a deterministic git-log/diff helper for the mechanical gathering step.",
+  "session_ids": [
+    "2d3c95ad-8f8a-4c2d-a45a-21a3152b6351",
+    "661a0670-6993-4e52-9fca-ba8d2485f9d1",
+    "ff8a9666-346e-4f83-be2f-f2d25278a687"
+  ],
+  "excluded_injection": [],
+  "method": "claude",
+  "created_at": "2026-11-03T06:56:36+00:00",
+  "updated_at": "2026-11-03T06:56:36+00:00",
+  "last_proposal": {
+    "draft": "generated/release-notes-generation",
+    "at": "2026-11-03T06:58:12+00:00",
+    "passed": false
+  }
+}
