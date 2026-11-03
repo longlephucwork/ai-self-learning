@@ -3,7 +3,7 @@
 Turns repeated Claude Code work into reusable skills, scripts and tools. **Nothing installs without explicit human approval.**
 
 Pipeline: CAPTURE → DETECT → CLASSIFY → GENERATE → VALIDATE → APPROVE → REGISTER → REFINE.
-Status: **Phase 1 (Capture) is done.** The files for Phases 2–5 are stubs.
+Status: **Phases 1 (Capture) and 2 (Detect + classify) are done.** The files for Phases 3–5 are stubs.
 
 ## Phase 1: Capture
 
@@ -23,6 +23,7 @@ store/                                 # git-ignored: personal session data
     session.json         # metadata, requests, tool steps, files touched, final result
     transcript.jsonl.gz  # redacted copy of the full transcript
     ratings.jsonl        # append-only outcome history; the last line wins
+    summary.json         # Phase 2 structured summary (written only by detect/)
   hook_events.jsonl      # append-only log of Stop / SessionEnd / backfill events
   hook_errors.log
 ```
@@ -48,3 +49,31 @@ This repo's own `.claude/settings.json` logs sessions run inside the repo throug
 
 ### Data handling
 `store/` is git-ignored: session data never goes into git. Thinking-block signatures are dropped from the copies. Tool inputs are truncated to 2000 chars and result previews to 500 chars in the DB. The full redacted transcript is kept in the gzip copy.
+
+## Phase 2: Detect + classify
+
+```bash
+python3 detect/find_patterns.py run                  # summarize new/changed sessions, then cluster
+python3 detect/find_patterns.py list                 # patterns, candidates first
+python3 detect/find_patterns.py show csv-to-json-conversion
+python3 detect/find_patterns.py summary <session>
+python3 detect/find_patterns.py cluster --method family --success accepted   # no LLM, stricter
+```
+
+| Piece | What it does |
+|---|---|
+| `detect/summarize.py` | Builds a compact digest from `session.json` (max 24k chars) and asks `claude -p` for `{intent, task_family, inputs, outputs, steps, deterministic, tools_used, injection_suspected}`. Writes `store/sessions/<id>/summary.json`. |
+| `detect/cluster.py` | Groups summaries into `patterns/<key>.json` (git-tracked). `--method claude` (default) merges near-duplicates and reuses existing keys; `--method family` groups by slug with no LLM. |
+| `harness_lib/claude_cli.py` | The single locked-down way the harness calls Claude. |
+| `harness_lib/schema_check.py` | Local re-validation of every model response before anything is written. |
+
+**Cost:** summaries use `claude-haiku-5-5` by default (`--model` or `$LEARNING_HARNESS_MODEL` to change). That's about $0.001 per session. A session is re-summarized only when its content fingerprint (`content_hash` in `session.json`) changes, so `Stop` re-ingests don't cost anything. Sessions still in progress (no `SessionEnd`, active in the last 30 min) are skipped.
+
+**Rules enforced in code, not by the model:**
+- *Success* = latest rating in `--success` (default `accepted,edited`). A pattern is a `candidate` at `--min-success` (default 3) successes.
+- Sessions with `injection_suspected` are listed under `excluded_injection` and never counted.
+- If fewer than 50% of a pattern's sessions are deterministic, a `script`/`tool` suggestion is overridden to `skill`.
+- Sessions the model leaves out of every cluster are recovered via the family grouping, never dropped.
+- Patterns with status `proposed`, `rejected`, `installed` or `retired` keep that status and any extra fields across re-clustering. Unlocked patterns that disappear are deleted.
+
+**Untrusted-input handling:** every model call runs with no tools (`--tools ""`), in an empty temp dir, with `--no-session-persistence`, a JSON schema, a budget cap and `LEARNING_HARNESS_DISABLE=1`. Session data is wrapped in random-nonce delimiters and declared untrusted in the system prompt. Detecting injections is best-effort: the model may miss one. That's why the harness doesn't rely on it alone. The other layers are the no-tools sandbox, excluding flagged sessions from counts, and the Phase 4 human review.

@@ -1,0 +1,23 @@
+{
+  "key": "repo-file-counting",
+  "label": "Count repo files by extension",
+  "description": "Count files of a given extension in a repository and list matching paths grouped by directory. The task is to answer how many files of one type exist.",
+  "status": "forming",
+  "n_sessions": 1,
+  "n_success": 0,
+  "success_outcomes": [
+    "accepted",
+    "edited"
+  ],
+  "min_success": 3,
+  "deterministic_frac": 1.0,
+  "suggested_type": "script",
+  "type_rationale": "The count and listing are deterministic once the extension is known. A script taking the repo path and extension as arguments can produce the total and grouped listing. The natural-language question only needs mapping to an extension, which a caller can do.",
+  "session_ids": [
+    "65e20d27-84f3-45bd-a9f3-c55264ba474d"
+  ],
+  "excluded_injection": [],
+  "method": "claude",
+  "created_at": "2026-11-03T03:52:05+00:00",
+  "updated_at": "2026-11-03T03:52:05+00:00"
+}

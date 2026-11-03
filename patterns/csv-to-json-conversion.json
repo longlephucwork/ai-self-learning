@@ -1,0 +1,26 @@
+{
+  "key": "csv-to-json-conversion",
+  "label": "CSV to JSON conversion",
+  "description": "Convert a small CSV file with a header row into a JSON array of objects, keyed by header names, saved to a new file. Numeric fields are written as numbers. Each run ends with a one-line confirmation.",
+  "status": "candidate",
+  "n_sessions": 4,
+  "n_success": 4,
+  "success_outcomes": [
+    "accepted",
+    "edited"
+  ],
+  "min_success": 3,
+  "deterministic_frac": 0.75,
+  "suggested_type": "script",
+  "type_rationale": "Input (CSV path) and output (JSON file) are fully defined and the transformation is deterministic. One CLI script that takes an input path and output path covers all four sessions. No judgment is needed.",
+  "session_ids": [
+    "28150c3c-9d9d-4ed1-86f7-8df303520181",
+    "5ea3fc45-2115-401c-9a12-54a08c0dc5ad",
+    "6c5a9cc7-d42e-465c-9675-8f6d6d671507",
+    "9c74a34f-ac40-41dc-9c7d-c322067b3e20"
+  ],
+  "excluded_injection": [],
+  "method": "claude",
+  "created_at": "2026-11-03T03:52:05+00:00",
+  "updated_at": "2026-11-03T03:52:05+00:00"
+}

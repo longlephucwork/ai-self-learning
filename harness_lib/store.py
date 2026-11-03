@@ -15,6 +15,7 @@ and land via atomic rename, so readers never see a half-written file.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import tempfile
@@ -128,6 +129,11 @@ def upsert_session(s, *, transcript_path: str, hook_event: str | None, end_reaso
     with _locked(d):
         old = read_json(d / "session.json") or {}
         steps = [asdict(st) for st in s.steps]
+        final = last_assistant_message or s.final_result or old.get("final_result")
+        files = [{"path": p, "action": a, "count": c} for (p, a), c in sorted(s.files.items())]
+        # Fingerprint of the learnable content; Phase 2 re-summarizes only when it changes.
+        content_hash = hashlib.sha256(json.dumps([s.requests, steps, files, final], sort_keys=True,
+                                                 ensure_ascii=False).encode()).hexdigest()[:16]
         rec = {
             "format_version": FORMAT_VERSION,
             "session_id": s.session_id,
@@ -142,7 +148,8 @@ def upsert_session(s, *, transcript_path: str, hook_event: str | None, end_reaso
             "end_reason": end_reason if end_reason is not None else old.get("end_reason"),
             "transcript_path": transcript_path,
             "first_request": s.requests[0]["text"] if s.requests else None,
-            "final_result": last_assistant_message or s.final_result or old.get("final_result"),
+            "final_result": final,
+            "content_hash": content_hash,
             "n_requests": len(s.requests),
             "n_tool_calls": len(steps),
             "n_tool_errors": sum(1 for st in steps if st["is_error"]),
@@ -153,7 +160,7 @@ def upsert_session(s, *, transcript_path: str, hook_event: str | None, end_reaso
             "last_hook_event": hook_event,
             "requests": s.requests,
             "steps": steps,
-            "files_touched": [{"path": p, "action": a, "count": c} for (p, a), c in sorted(s.files.items())],
+            "files_touched": files,
         }
         write_json_atomic(d / "session.json", rec)
     append_jsonl(store_dir() / "hook_events.jsonl",
@@ -207,3 +214,43 @@ def outcome(sid: str) -> dict:
     if not hist:
         return {"outcome": "unknown", "source": None, "note": None, "created_at": None}
     return hist[-1]
+
+
+# ---------- summaries (Phase 2; written only by detect/) ----------
+
+def load_summary(sid: str) -> dict | None:
+    return read_json(session_dir(sid) / "summary.json")
+
+
+def save_summary(sid: str, rec: dict) -> None:
+    write_json_atomic(session_dir(sid) / "summary.json", rec)
+
+
+# ---------- patterns (Phase 2+; git-tracked, outside store/) ----------
+
+def patterns_dir() -> Path:
+    d = Path(os.environ.get("LEARNING_HARNESS_PATTERNS", REPO_ROOT / "patterns"))
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def _pattern_path(key: str) -> Path:
+    if not key or "/" in key or key.startswith("."):
+        raise ValueError(f"bad pattern key {key!r}")
+    return patterns_dir() / f"{key}.json"
+
+
+def load_pattern(key: str) -> dict | None:
+    return read_json(_pattern_path(key))
+
+
+def save_pattern(rec: dict) -> None:
+    write_json_atomic(_pattern_path(rec["key"]), rec)
+
+
+def delete_pattern(key: str) -> None:
+    _pattern_path(key).unlink(missing_ok=True)
+
+
+def iter_patterns() -> list[dict]:
+    return [r for p in sorted(patterns_dir().glob("*.json")) if (r := read_json(p))]
