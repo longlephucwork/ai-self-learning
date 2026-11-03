@@ -1,0 +1,85 @@
+{
+  "validated_at": "2026-11-03T04:06:01+00:00",
+  "network_isolated": true,
+  "tests": [
+    {
+      "name": "cities",
+      "passed": true,
+      "problems": [],
+      "exit": 0,
+      "stdout": "Wrote 3 rows to cities.json\n",
+      "stderr": "",
+      "unexpected_new_files": []
+    },
+    {
+      "name": "kv numeric v",
+      "passed": true,
+      "problems": [],
+      "exit": 0,
+      "stdout": "Wrote 1 rows to kv.json\n",
+      "stderr": "",
+      "unexpected_new_files": []
+    },
+    {
+      "name": "fruit",
+      "passed": true,
+      "problems": [],
+      "exit": 0,
+      "stdout": "Wrote 2 rows to fruit.json\n",
+      "stderr": "",
+      "unexpected_new_files": []
+    },
+    {
+      "name": "prices",
+      "passed": true,
+      "problems": [],
+      "exit": 0,
+      "stdout": "Wrote 3 rows to prices.json\n",
+      "stderr": "",
+      "unexpected_new_files": []
+    },
+    {
+      "name": "missing input",
+      "passed": true,
+      "problems": [],
+      "exit": 1,
+      "stdout": "",
+      "stderr": "error: cannot read nope.csv: [Errno 2] No such file or directory: 'nope.csv'\n",
+      "unexpected_new_files": []
+    }
+  ],
+  "provenance": [
+    {
+      "name": "cities",
+      "provenance": "logged",
+      "problems": []
+    },
+    {
+      "name": "kv numeric v",
+      "provenance": "derived_from_feedback",
+      "problems": []
+    },
+    {
+      "name": "fruit",
+      "provenance": "logged",
+      "problems": []
+    },
+    {
+      "name": "prices",
+      "provenance": "logged",
+      "problems": []
+    },
+    {
+      "name": "missing input",
+      "provenance": "synthetic",
+      "problems": []
+    }
+  ],
+  "coverage": {
+    "successful_sessions": 4,
+    "covered": 4,
+    "required": 3
+  },
+  "passed": true,
+  "problems": []
+}

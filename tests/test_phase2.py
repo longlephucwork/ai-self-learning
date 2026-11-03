@@ -26,6 +26,7 @@ def transcript(path, sid, request, tool_result="ok", ts="2026-11-01T10:00:00Z"):
 
 class Phase2(unittest.TestCase):
     def setUp(self):
+        self._env = dict(os.environ)
         self.tmp = tempfile.TemporaryDirectory()
         t = Path(self.tmp.name)
         os.environ["LEARNING_HARNESS_STORE"] = str(t / "store")
@@ -52,6 +53,8 @@ class Phase2(unittest.TestCase):
 
     def tearDown(self):
         self.tmp.cleanup()
+        os.environ.clear()
+        os.environ.update(self._env)
 
     def calls(self):
         p = self.t / "calls.jsonl"

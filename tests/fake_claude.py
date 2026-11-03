@@ -11,7 +11,11 @@ if log:
         fh.write(json.dumps({"args": args, "cwd": os.getcwd(),
                              "disable": os.environ.get("LEARNING_HARNESS_DISABLE")}) + "\n")
 
-if "clusters" in schema["properties"]:
+if "tests" in schema["properties"]:  # Phase 3 proposal: return a canned file chosen by the test
+    key = "FAKE_PROPOSAL_FILE_2" if "previous attempt FAILED" in prompt and os.environ.get("FAKE_PROPOSAL_FILE_2") \
+        else "FAKE_PROPOSAL_FILE"
+    out = json.load(open(os.environ[key]))
+elif "clusters" in schema["properties"]:
     m = re.search(r"<<<DATA-(\w+)\n(.*)\nDATA-\1>>>", prompt, re.S)
     items = json.loads(m.group(2))
     drop = os.environ.get("FAKE_DROP_ID", "")

@@ -3,7 +3,7 @@
 Turns repeated Claude Code work into reusable skills, scripts and tools. **Nothing installs without explicit human approval.**
 
 Pipeline: CAPTURE → DETECT → CLASSIFY → GENERATE → VALIDATE → APPROVE → REGISTER → REFINE.
-Status: **Phases 1 (Capture) and 2 (Detect + classify) are done.** The files for Phases 3–5 are stubs.
+Status: **Phases 1–3 (Capture, Detect + classify, Generate + validate) are done.** Phases 4–5 are stubs. Nothing is ever installed automatically.
 
 ## Phase 1: Capture
 
@@ -77,3 +77,34 @@ python3 detect/find_patterns.py cluster --method family --success accepted   # n
 - Patterns with status `proposed`, `rejected`, `installed` or `retired` keep that status and any extra fields across re-clustering. Unlocked patterns that disappear are deleted.
 
 **Untrusted-input handling:** every model call runs with no tools (`--tools ""`), in an empty temp dir, with `--no-session-persistence`, a JSON schema, a budget cap and `LEARNING_HARNESS_DISABLE=1`. Session data is wrapped in random-nonce delimiters and declared untrusted in the system prompt. Detecting injections is best-effort: the model may miss one. That's why the harness doesn't rely on it alone. The other layers are the no-tools sandbox, excluding flagged sessions from counts, and the Phase 4 human review.
+
+## Phase 3: Generate + validate
+
+```bash
+python3 generate/propose.py csv-to-json-conversion   # draft + validate (candidate patterns only)
+python3 generate/propose.py list                     # drafts and their status
+python3 validate/replay.py csv-to-json               # re-run validation after hand-editing a draft
+```
+
+A draft lives in `generated/<name>/` (git-tracked) and is **not installed**:
+```
+proposal.json    type, spec, tests (with provenance), scan flags, evidence session ids, attempts, cost
+files/...        the artifact's files
+validation.json  provenance, coverage and sandbox results
+```
+If validation passes, the pattern's status becomes `proposed` and it waits for Phase 4 review.
+
+**Generation** (`generate/propose.py`): Claude (default `claude-sonnet-5-5`, no tools) gets the pattern plus each member session's requests, tool steps and rating notes. These are delimited and marked untrusted, and injection-flagged sessions are left out. It returns `{type, name, description, spec, entrypoint, files[], tests[]}`. If validation fails, the failures go back to Claude for a repair attempt (`--max-attempts`, default 2).
+
+**Checks enforced in code:**
+| Check | Rule |
+|---|---|
+| Structure | Relative paths only (no `..`, absolute or `~`), allowed extensions `.py .md .json .txt`, at most 6 files. A script or tool needs a `.py` entrypoint, and a tool needs a valid JSON Schema. A pattern under 50% deterministic can't become a script or tool. |
+| Provenance | A `logged` test's input files and expected outputs must appear in that session's redacted transcript (whitespace and `cat -n` prefixes ignored, JSON compared structurally). A `derived_from_feedback` test needs logged inputs and a rating note on that session. `synthetic` tests are allowed but don't count toward coverage. |
+| Coverage | Logged or derived tests must cover at least `min(3, successful sessions)` successful sessions. |
+| Safety scan (`harness_lib/scan.py`) | AST/regex flags for network, subprocess/eval, environment or credential access, deletion, and absolute or parent paths. Any of these fails validation and is shown to the reviewer. `write_any` is informational only. |
+| Sandbox (`validate/replay.py`) | Each test runs in a fresh temp dir under `unshare -rn` (no network), with `python3 -I`, an environment of only `PATH`/`LANG`/`HOME`, CPU 10s, 512MB memory, 10MB max file size and a 20s timeout. If network isolation is unavailable, it refuses to run unless `--allow-no-netns` is passed. |
+
+Skills are checked statically only: frontmatter `name`/`description`, and any `scripts/...` they reference must exist. Behavioural evaluation of skills needs a model run and isn't implemented yet.
+
+**Note:** tests are built from real session data, so `generated/` contains (redacted) snippets of your sessions, and that folder is committed to git.

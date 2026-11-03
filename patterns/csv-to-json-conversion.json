@@ -2,7 +2,7 @@
   "key": "csv-to-json-conversion",
   "label": "CSV to JSON conversion",
   "description": "Convert a small CSV file with a header row into a JSON array of objects, keyed by header names, saved to a new file. Numeric fields are written as numbers. Each run ends with a one-line confirmation.",
-  "status": "candidate",
+  "status": "proposed",
   "n_sessions": 4,
   "n_success": 4,
   "success_outcomes": [
@@ -22,5 +22,11 @@
   "excluded_injection": [],
   "method": "claude",
   "created_at": "2026-11-03T03:52:05+00:00",
-  "updated_at": "2026-11-03T03:52:05+00:00"
+  "updated_at": "2026-11-03T03:52:05+00:00",
+  "last_proposal": {
+    "draft": "generated/csv-to-json",
+    "at": "2026-11-03T04:05:38+00:00",
+    "passed": true
+  },
+  "proposal": "generated/csv-to-json"
 }

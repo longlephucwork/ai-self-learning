@@ -14,11 +14,14 @@ FIX = ROOT / "tests" / "fixtures" / "sample.jsonl"
 
 class Phase1(unittest.TestCase):
     def setUp(self):
+        self._env = dict(os.environ)
         self.tmp = tempfile.TemporaryDirectory()
         os.environ["LEARNING_HARNESS_STORE"] = self.tmp.name
 
     def tearDown(self):
         self.tmp.cleanup()
+        os.environ.clear()
+        os.environ.update(self._env)
 
     def test_redact(self):
         from harness_lib.redact import redact
