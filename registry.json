@@ -28,10 +28,7 @@
       "approved_at": "2026-11-03T04:15:09+00:00",
       "approval_note": "approved by the user in chat",
       "draft": "/home/user/learning-harness/generated/csv-to-json",
-      "usage": {
-        "runs": 0,
-        "failures": 0
-      }
+      "shim": "bin/csv-to-json"
     }
   },
   "history": [
