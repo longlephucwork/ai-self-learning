@@ -7,13 +7,13 @@ A tool's definition lives in mcp_tools/tools/<name>/tool.json and comes in one o
                        with a template, e.g.
                          ["{input}", "{output}", {"when": "delimiter", "argv": ["--delimiter", "{delimiter}"]}]
 
-Every call runs sandboxed: no network (unshare -rn when available), scrubbed environment, CPU/memory/
-file-size limits and a timeout. Its cwd is the project directory, because tools act on the user's files.
+Every call runs sandboxed (harness_lib/sandbox.py): no network (unshare -rn on Linux, sandbox-exec on
+macOS), scrubbed environment, CPU/memory/file-size limits where the OS supports them, and a timeout.
+Its cwd is the project directory, because tools act on the user's files.
 """
 from __future__ import annotations
 
 import json
-import os
 import re
 import shutil
 import subprocess
@@ -22,6 +22,7 @@ import tempfile
 import time
 from pathlib import Path
 
+from . import sandbox
 from .schema_check import validate
 
 SERVER_NAME = "learned"           # Claude Code shows tools as mcp__learned__<tool>
@@ -128,26 +129,8 @@ def render_argv(template: list, args: dict) -> list[str]:
 
 # ---------------- execution ----------------
 
-_NETNS: bool | None = None
-
-
 def netns_available() -> bool:
-    global _NETNS
-    if _NETNS is None:
-        try:
-            _NETNS = bool(shutil.which("unshare")) and subprocess.run(
-                ["unshare", "-rn", "true"], capture_output=True, timeout=5).returncode == 0
-        except (OSError, subprocess.TimeoutExpired):
-            _NETNS = False
-    return _NETNS
-
-
-def _limits():
-    import resource
-    resource.setrlimit(resource.RLIMIT_CPU, (30, 30))
-    resource.setrlimit(resource.RLIMIT_AS, (1024 * 2**20, 1024 * 2**20))
-    resource.setrlimit(resource.RLIMIT_FSIZE, (100 * 2**20, 100 * 2**20))
-    resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
+    return sandbox.network_isolated()
 
 
 def run_tool(tool: dict, args: dict, *, cwd: str, require_netns: bool = True) -> dict:
@@ -155,10 +138,9 @@ def run_tool(tool: dict, args: dict, *, cwd: str, require_netns: bool = True) ->
     probs = check_arguments(args, tool["input_schema"], mode=tool["mode"])
     if probs:
         return {"exit": None, "rejected": "; ".join(probs), "stdout": "", "stderr": "", "duration_ms": 0}
-    netns = netns_available()
-    if require_netns and not netns:
-        return {"exit": None, "rejected": "network isolation (unshare -rn) unavailable; refusing to run",
-                "stdout": "", "stderr": "", "duration_ms": 0}
+    ok, why = sandbox.may_run(not require_netns)
+    if not ok:
+        return {"exit": None, "rejected": why, "stdout": "", "stderr": "", "duration_ms": 0}
     if tool["mode"] == "argv":
         try:
             argv, stdin = render_argv(tool["argv_template"], args), ""
@@ -167,14 +149,11 @@ def run_tool(tool: dict, args: dict, *, cwd: str, require_netns: bool = True) ->
     else:
         argv, stdin = [], json.dumps(args)
     cmd = [sys.executable, "-I", str(tool["command"]), *argv]
-    if netns:
-        cmd = ["unshare", "-rn", "--", *cmd]
     home = tempfile.mkdtemp(prefix="lh-tool-home-")
-    env = {"PATH": "/usr/bin:/bin", "LANG": "C.UTF-8", "HOME": home, "PYTHONDONTWRITEBYTECODE": "1"}
     t0 = time.time()
     try:
-        p = subprocess.run(cmd, cwd=cwd, env=env, input=stdin, capture_output=True, text=True,
-                           timeout=RUN_TIMEOUT_S, preexec_fn=_limits)
+        p = sandbox.run(cmd, cwd=cwd, env=sandbox.clean_env(home), stdin=stdin, timeout=RUN_TIMEOUT_S,
+                        cpu_s=30, mem_mb=1024, fsize_mb=100)
         res = {"exit": p.returncode, "stdout": p.stdout[:MAX_OUTPUT], "stderr": p.stderr[:MAX_OUTPUT]}
     except subprocess.TimeoutExpired:
         res = {"exit": -9, "stdout": "", "stderr": f"timed out after {RUN_TIMEOUT_S}s"}

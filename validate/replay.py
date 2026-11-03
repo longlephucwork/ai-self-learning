@@ -6,9 +6,9 @@
 
 Sandbox per test:
   * fresh temp dir holding only the draft's files and the test's input files
-  * `unshare -rn`: new user + network namespace, so no network at all
-  * `python3 -I`, empty environment (PATH, LANG, HOME=sandbox), no secrets
-  * CPU 10s, memory 512MB, max file size 10MB, wall-clock timeout 20s
+  * no network: `unshare -rn` on Linux, `sandbox-exec` on macOS (harness_lib/sandbox.py)
+  * `python3 -I`, scrubbed environment (PATH, LANG, HOME=sandbox), no secrets
+  * CPU 10s, memory 512MB, max file size 10MB (POSIX), wall-clock timeout 20s
 Generated code never runs outside this.
 
 Provenance (no execution): a `logged` test's input files and expected outputs
@@ -32,6 +32,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from harness_lib import store  # noqa: E402
+from harness_lib import sandbox  # noqa: E402
 from harness_lib import tools as rt  # noqa: E402
 
 TIMEOUT_S = 20
@@ -41,20 +42,8 @@ MAX_OUTPUT = 4000
 # ---------------- sandbox ----------------
 
 def netns_available() -> bool:
-    if not shutil.which("unshare"):
-        return False
-    try:
-        return subprocess.run(["unshare", "-rn", "true"], capture_output=True, timeout=5).returncode == 0
-    except (OSError, subprocess.TimeoutExpired):
-        return False
-
-
-def _limits():
-    import resource
-    resource.setrlimit(resource.RLIMIT_CPU, (10, 10))
-    resource.setrlimit(resource.RLIMIT_AS, (512 * 2**20, 512 * 2**20))
-    resource.setrlimit(resource.RLIMIT_FSIZE, (10 * 2**20, 10 * 2**20))
-    resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
+    """True when generated code can run without network access on this OS."""
+    return sandbox.network_isolated()
 
 
 def safe_rel(path: str) -> str:
@@ -99,12 +88,9 @@ def run_test(files: dict[str, str], entrypoint: str, test: dict, *, netns: bool)
             dst.write_text(f["content"], encoding="utf-8")
         before = {p.relative_to(box).as_posix() for p in box.rglob("*") if p.is_file()}
         cmd = [sys.executable, "-I", safe_rel(entrypoint)] + list(test.get("args", []))
-        if netns:
-            cmd = ["unshare", "-rn", "--"] + cmd
-        env = {"PATH": "/usr/bin:/bin", "LANG": "C.UTF-8", "HOME": str(box), "PYTHONDONTWRITEBYTECODE": "1"}
         try:
-            p = subprocess.run(cmd, cwd=box, env=env, input=test.get("stdin", ""), capture_output=True,
-                               text=True, timeout=TIMEOUT_S, preexec_fn=_limits)
+            p = sandbox.run(cmd, cwd=str(box), env=sandbox.clean_env(str(box)), stdin=test.get("stdin", ""),
+                            timeout=TIMEOUT_S, cpu_s=10, mem_mb=512, fsize_mb=10)
             res.update(exit=p.returncode, stdout=p.stdout[:MAX_OUTPUT], stderr=p.stderr[:MAX_OUTPUT])
         except subprocess.TimeoutExpired:
             res["problems"].append(f"timed out after {TIMEOUT_S}s")
@@ -281,8 +267,9 @@ def validate_exposure(proposal: dict, files: dict[str, str], *, allow_no_netns=F
             mapped += 1
     rep["coverage"] = {"successful_sessions": len(script_tests), "covered": mapped, "required": len(script_tests)}
     if not P:
-        if not netns and not allow_no_netns:
-            P.append("network isolation (unshare -rn) unavailable; refusing to run code")
+        ok, why = sandbox.may_run(allow_no_netns)
+        if not ok:
+            P.append(why)
         else:
             for st in script_tests:
                 r = run_test(script_files, entry["entrypoint"], st, netns=netns)
@@ -342,9 +329,9 @@ def validate_draft(proposal: dict, files: dict[str, str], pattern: dict, *, allo
     if proposal["type"] in ("script", "tool"):
         if not tests:
             report["problems"].append("no tests")
-        if not netns and not allow_no_netns:
-            report["problems"].append("network isolation (unshare -rn) unavailable; refusing to run generated "
-                                      "code. Pass --allow-no-netns to run without it.")
+        ok, why = sandbox.may_run(allow_no_netns)
+        if not ok:
+            report["problems"].append(why)
         else:
             entry = proposal["entrypoint"]
             if entry not in files:

@@ -51,7 +51,7 @@ def sessions_dir() -> Path:
 
 
 def session_dir(sid: str, create: bool = False) -> Path:
-    if not sid or "/" in sid or sid.startswith("."):
+    if not sid or "/" in sid or "\\" in sid or ":" in sid or sid.startswith("."):
         raise ValueError(f"bad session id {sid!r}")
     d = sessions_dir() / sid
     if create:
@@ -235,7 +235,7 @@ def patterns_dir() -> Path:
 
 
 def _pattern_path(key: str) -> Path:
-    if not key or "/" in key or key.startswith("."):
+    if not key or "/" in key or "\\" in key or ":" in key or key.startswith("."):
         raise ValueError(f"bad pattern key {key!r}")
     return patterns_dir() / f"{key}.json"
 

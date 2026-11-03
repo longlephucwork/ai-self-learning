@@ -31,6 +31,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from harness_lib import store  # noqa: E402
 
 
+COPY_MARKER = ".learning-harness-copy"
+
+
 class InstallError(RuntimeError):
     pass
 
@@ -76,12 +79,26 @@ def shim_path(name: str) -> Path:
     return install_root() / "bin" / name
 
 
+CMD_SHIM = """@echo off
+rem learning-harness usage wrapper for '{name}' on Windows: runs bin\\{name} with Python.
+if defined LEARNING_HARNESS_PYTHON (
+  "%LEARNING_HARNESS_PYTHON%" "%~dp0{name}" %*
+) else (
+  python "%~dp0{name}" %*
+)
+exit /b %ERRORLEVEL%
+"""
+
+
 def write_shim(entry: dict) -> Path:
+    """bin/<name> (Python, used directly on Linux/macOS) and bin/<name>.cmd (Windows)."""
     p = shim_path(entry["name"])
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(SHIM.format(name=entry["name"], version=entry["version"],
                              entry=f"{entry['path']}/{entry['entrypoint']}"), encoding="utf-8")
     os.chmod(p, 0o755)
+    with open(p.with_name(p.name + ".cmd"), "w", encoding="utf-8", newline="\r\n") as fh:
+        fh.write(CMD_SHIM.format(name=entry["name"]))
     return p
 
 
@@ -183,7 +200,8 @@ def install(proposal: dict, files: dict[str, str], *, draft_dir: Path, note: str
     link = None
     if kind == "skill":
         link = skills_link_dir() / name
-        if link.exists() and not (link.is_symlink() and link.resolve() == dest.resolve()):
+        ours = (link.is_symlink() and link.resolve() == dest.resolve()) or (link / COPY_MARKER).exists()
+        if (link.exists() or link.is_symlink()) and not ours:
             raise InstallError(f"{link} already exists and is not ours; not overwriting it")
 
     # Write the new version into place (replace the folder wholesale; git keeps the old one).
@@ -201,8 +219,15 @@ def install(proposal: dict, files: dict[str, str], *, draft_dir: Path, note: str
     os.replace(tmp, dest)
     if link is not None:
         link.parent.mkdir(parents=True, exist_ok=True)
-        if not link.is_symlink():
-            link.symlink_to(dest.resolve(), target_is_directory=True)
+        if link.exists() and (link / COPY_MARKER).exists():
+            shutil.rmtree(link)  # our earlier copy; refresh it
+        if not link.is_symlink() and not link.exists():
+            try:
+                link.symlink_to(dest.resolve(), target_is_directory=True)
+            except OSError:
+                # Windows without developer mode can't create symlinks: install a marked copy instead.
+                shutil.copytree(dest, link)
+                (link / COPY_MARKER).write_text(f"copy of {dest}; managed by learning-harness\n", encoding="utf-8")
 
     pattern = store.load_pattern(proposal["pattern_key"]) or {}
     entry = {
@@ -248,7 +273,7 @@ def install(proposal: dict, files: dict[str, str], *, draft_dir: Path, note: str
                f"Approved by a human via review/cli.py" + (f": {note}" if note else ""))
         paths = [dest, registry_path(), store.patterns_dir() / f"{proposal['pattern_key']}.json", draft_dir]
         if entry.get("shim"):
-            paths.append(install_root() / entry["shim"])
+            paths += [install_root() / entry["shim"], install_root() / (entry["shim"] + ".cmd")]
         entry["commit"] = git_commit(paths, msg)
     return entry
 
@@ -284,10 +309,13 @@ def uninstall(name: str, *, reason: str | None = None, use_git: bool = True, for
         link = Path(entry["symlink"])
         if link.is_symlink():
             link.unlink()
+        elif link.is_dir() and (link / COPY_MARKER).exists():
+            shutil.rmtree(link)
     shutil.rmtree(dest, ignore_errors=True)
     shim = shim_path(name)
-    if shim.exists():
-        shim.unlink()
+    for f in (shim, shim.with_name(shim.name + ".cmd")):
+        if f.exists():
+            f.unlink()
     reg["history"].append({"event": "uninstall", "name": name, "version": entry["version"], "at": store.now(),
                            "note": reason})
     _save_registry(reg)
@@ -297,7 +325,7 @@ def uninstall(name: str, *, reason: str | None = None, use_git: bool = True, for
         pattern["retired"] = {"at": store.now(), "reason": reason}
         store.save_pattern(pattern)
     if use_git and git_available():
-        return git_commit([dest, shim, registry_path(), store.patterns_dir() / f"{entry['pattern_key']}.json"],
+        return git_commit([dest, shim, shim.with_name(shim.name + ".cmd"), registry_path(), store.patterns_dir() / f"{entry['pattern_key']}.json"],
                           f"learned: uninstall {entry['type']} {name}" + (f"\n\nReason: {reason}" if reason else ""))
     return None
 
@@ -317,7 +345,7 @@ def main(argv=None):
             if e["type"] == "script":
                 e.pop("usage", None)  # superseded by store/usage/<name>.jsonl
                 e["shim"] = write_shim(e).relative_to(install_root()).as_posix()
-                paths.append(install_root() / e["shim"])
+                paths += [install_root() / e["shim"], install_root() / (e["shim"] + ".cmd")]
                 print(f"wrote {e['shim']}")
         _save_registry(reg)
         if paths and not a.no_git and git_available():

@@ -1,7 +1,7 @@
 {
   "mcpServers": {
     "learned": {
-      "command": "python3",
+      "command": "${LEARNING_HARNESS_PYTHON:-python3}",
       "args": [
         "${CLAUDE_PROJECT_DIR:-.}/mcp_tools/server.py"
       ]

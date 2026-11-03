@@ -1,0 +1,155 @@
+import io
+import json
+import os
+import sys
+import tempfile
+import unittest
+from contextlib import redirect_stdout
+from pathlib import Path
+from unittest import mock
+
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
+import install  # noqa: E402
+
+FAKE_CLAUDE = """#!/usr/bin/env python3
+import json, os, sys
+log = os.environ["FAKE_CLAUDE_CALLS"]
+calls = json.load(open(log)) if os.path.exists(log) else []
+calls.append(sys.argv[1:])
+json.dump(calls, open(log, "w"))
+if sys.argv[1:3] == ["mcp", "get"]:
+    sys.exit(0 if any(c[:2] == ["mcp", "add"] for c in calls) and not calls[-2][:2] == ["mcp", "remove"] else 1)
+print("9.9.9 (Claude Code)")
+"""
+
+
+class Installer(unittest.TestCase):
+    def setUp(self):
+        self._env = dict(os.environ)
+        self.tmp = tempfile.TemporaryDirectory()
+        t = self.t = Path(self.tmp.name)
+        (t / "home").mkdir()
+        fake = t / "claude"
+        fake.write_text(FAKE_CLAUDE); fake.chmod(0o755)
+        os.environ.update(HOME=str(t / "home"), SHELL="/bin/zsh", LEARNING_HARNESS_CLAUDE_BIN=str(fake),
+                          FAKE_CLAUDE_CALLS=str(t / "calls.json"), LEARNING_HARNESS_STORE=str(t / "store"))
+
+    def tearDown(self):
+        self.tmp.cleanup()
+        os.environ.clear(); os.environ.update(self._env)
+
+    def calls(self):
+        return json.loads((self.t / "calls.json").read_text())
+
+    def run_main(self, *argv):
+        out = io.StringIO()
+        with redirect_stdout(out):
+            rc = install.main(list(argv))
+        return rc, out.getvalue()
+
+    def test_rc_block_is_idempotent_and_removable(self):
+        rc = Path(os.environ["HOME"]) / ".zshrc"
+        rc.write_text("alias ll='ls -l'\n")
+        for _ in range(3):
+            install.edit_rc(rc, install.rc_block(rc))
+        text = rc.read_text()
+        self.assertEqual(text.count(install.MARK_BEGIN), 1)
+        self.assertIn(f'export PATH="{(ROOT / "bin").as_posix()}:$PATH"', text)
+        self.assertIn("alias ll='ls -l'", text)
+        install.edit_rc(rc, None)
+        self.assertEqual(rc.read_text(), "alias ll='ls -l'\n")
+
+    def test_rc_file_per_shell(self):
+        home = Path(os.environ["HOME"])
+        for shell, name in (("/bin/zsh", ".zshrc"), ("/usr/bin/fish", "config.fish"), ("/bin/sh", ".profile")):
+            os.environ["SHELL"] = shell
+            self.assertEqual(install.rc_file().name, name)
+        os.environ["SHELL"] = "/bin/bash"
+        with mock.patch.object(sys, "platform", "darwin"):
+            self.assertEqual(install.rc_file(), home / ".bash_profile")
+        fish = home / ".config" / "fish" / "config.fish"
+        self.assertIn("set -gx PATH", install.rc_block(fish))
+
+    def test_full_install_check_and_uninstall(self):
+        rc, out = self.run_main("--yes", "--skip-tests")
+        self.assertEqual(rc, 0, out)
+        settings = json.loads((Path(os.environ["HOME"]) / ".claude" / "settings.json").read_text())
+        cmds = [h["command"] for ev in ("Stop", "SessionEnd") for g in settings["hooks"][ev] for h in g["hooks"]]
+        self.assertEqual(len(cmds), 2)
+        self.assertTrue(all(c.startswith(f'"{install.python_exe()}"') for c in cmds), cmds)  # absolute interpreter
+        add = [c for c in self.calls() if c[:2] == ["mcp", "add"]][-1]
+        self.assertEqual(add[:5], ["mcp", "add", "--scope", "user", "learned"])
+        self.assertEqual(add[-2:], [install.python_exe(), (ROOT / "mcp_tools" / "server.py").as_posix()])
+        self.assertIn(install.MARK_BEGIN, (Path(os.environ["HOME"]) / ".zshrc").read_text())
+        rc, out = self.run_main("--yes", "--skip-tests")              # re-run: still one of each
+        settings = json.loads((Path(os.environ["HOME"]) / ".claude" / "settings.json").read_text())
+        self.assertEqual(sum(len(g["hooks"]) for g in settings["hooks"]["Stop"]), 1)
+        self.assertEqual((Path(os.environ["HOME"]) / ".zshrc").read_text().count(install.MARK_BEGIN), 1)
+        rc, out = self.run_main("--check")
+        self.assertIn("hooks installed", out)
+        self.assertIn("on PATH", out)
+        rc, out = self.run_main("--uninstall", "--yes")
+        self.assertEqual(rc, 0, out)
+        settings = json.loads((Path(os.environ["HOME"]) / ".claude" / "settings.json").read_text())
+        self.assertNotIn("hooks", settings)
+        self.assertNotIn(install.MARK_BEGIN, (Path(os.environ["HOME"]) / ".zshrc").read_text())
+        self.assertEqual(self.calls()[-1][:3], ["mcp", "remove", "learned"])
+
+    def test_opt_outs(self):
+        rc, out = self.run_main("--yes", "--skip-tests", "--no-hooks", "--no-mcp", "--no-path")
+        self.assertEqual(rc, 0)
+        self.assertFalse((Path(os.environ["HOME"]) / ".claude" / "settings.json").exists())
+        self.assertFalse((Path(os.environ["HOME"]) / ".zshrc").exists())
+        self.assertFalse(any(c[:2] == ["mcp", "add"] for c in self.calls()))
+
+    def test_without_claude_cli_prints_manual_command(self):
+        os.environ["LEARNING_HARNESS_CLAUDE_BIN"] = ""
+        with mock.patch("shutil.which", side_effect=lambda n: None if n == "claude" else "/usr/bin/" + n):
+            rc, out = self.run_main("--yes", "--skip-tests", "--no-hooks", "--no-path")
+        self.assertEqual(rc, 0)
+        self.assertIn("claude mcp add --scope user learned", out)
+
+    def test_no_sandbox_refuses_unless_opted_in(self):
+        from harness_lib import sandbox
+        with mock.patch.object(sandbox, "_backend", "none"):
+            self.assertFalse(sandbox.may_run()[0])
+            self.assertIn("no network sandbox", sandbox.may_run()[1])
+            rc, out = self.run_main("--yes", "--skip-tests", "--no-hooks", "--no-mcp", "--no-path")
+            self.assertIn("left disabled", out)                     # --yes never opts in silently
+            self.assertFalse(sandbox.may_run()[0])
+            rc, out = self.run_main("--yes", "--skip-tests", "--no-hooks", "--no-mcp", "--no-path",
+                                    "--allow-unsandboxed")
+            self.assertTrue(sandbox.may_run()[0])
+            self.assertTrue(json.loads((self.t / "store" / "config.json").read_text())["allow_unsandboxed"])
+
+    def test_sandbox_blocks_network_here(self):
+        from harness_lib import sandbox
+        if sandbox.backend() == "none":
+            self.skipTest("no sandbox backend on this machine")
+        r = sandbox.run([sys.executable, "-I", "-c",
+                         "import socket\ntry:\n socket.create_connection(('1.1.1.1',53),timeout=3);print('open')\n"
+                         "except OSError:\n print('blocked')"], cwd=str(self.t), env=sandbox.clean_env(str(self.t)),
+                        timeout=20)
+        self.assertEqual(r.stdout.strip(), "blocked")
+
+    def test_windows_env_is_complete(self):
+        from harness_lib import sandbox
+        with mock.patch.object(os, "name", "nt"), mock.patch.dict(os.environ, {"SYSTEMROOT": r"C:\Windows",
+                                                                               "PATH": r"C:\Windows", "API_TOKEN": "x"}):
+            env = sandbox.clean_env(r"C:\tmp\box")
+        self.assertEqual(env["SYSTEMROOT"], r"C:\Windows")
+        self.assertEqual(env["USERPROFILE"], r"C:\tmp\box")
+        self.assertNotIn("API_TOKEN", env)
+
+    def test_launchers_and_line_endings(self):
+        self.assertTrue(os.access(ROOT / "install.sh", os.X_OK))
+        self.assertNotIn(b"\r\n", (ROOT / "install.sh").read_bytes())
+        for f in ("install.bat", "install.ps1", "bin/csv-to-json.cmd"):
+            data = (ROOT / f).read_bytes()
+            self.assertEqual(data.count(b"\n"), data.count(b"\r\n"), f)   # every newline is CRLF
+        self.assertIn('install.ps1" %*', (ROOT / "install.bat").read_text())
+
+
+if __name__ == "__main__":
+    unittest.main()

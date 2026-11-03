@@ -5,6 +5,48 @@ Turns repeated Claude Code work into reusable skills, scripts and tools. **Nothi
 Pipeline: CAPTURE → DETECT → CLASSIFY → GENERATE → VALIDATE → APPROVE → REGISTER → REFINE.
 Status: **All five phases are done**, plus the MCP tool server that lets Claude find and call approved tools by itself. Nothing is ever installed without your explicit approval.
 
+## Installation
+
+Needs **Python 3.10+**, **git**, and **Claude Code** (`claude` CLI). The installer asks before each change, is safe to re-run, and `--uninstall` reverses it.
+
+**Linux / macOS**
+```bash
+curl -fsSL https://raw.githubusercontent.com/longlephucwork/claude-learning-harness/main/install.sh | bash
+```
+or from a clone: `git clone https://github.com/longlephucwork/claude-learning-harness.git && cd claude-learning-harness && ./install.sh`
+
+**Windows** (PowerShell)
+```powershell
+irm https://raw.githubusercontent.com/longlephucwork/claude-learning-harness/main/install.ps1 | iex
+```
+or from a clone: double-click `install.bat` (or run `install.bat` in a terminal).
+
+The launchers find a suitable Python, clone the repo to `~/claude-learning-harness` (or `$LEARNING_HARNESS_DIR`) if needed, and run `install.py`, which:
+1. checks Python, git and the `claude` CLI
+2. detects the code sandbox and proves it blocks the network
+3. runs a quick offline self-test
+4. adds the session-logging hooks to `~/.claude/settings.json`, using the absolute Python path
+5. registers the MCP server: `claude mcp add --scope user learned -- <python> mcp_tools/server.py`
+6. adds `bin/` to your PATH and sets `LEARNING_HARNESS_PYTHON` (shell rc file on Linux/macOS, user environment on Windows)
+
+```bash
+python3 install.py --check        # what is installed (use `python` on Windows)
+python3 install.py --uninstall    # undo it; keeps the repo, store/ data and installed artifacts
+python3 install.py --yes          # no questions; also: --no-hooks --no-mcp --no-path --skip-tests
+```
+
+**Code sandbox per OS.** Generated code (during validation) and learned MCP tools run without network access:
+
+| OS | Sandbox | Notes |
+|---|---|---|
+| Linux | `unshare -rn` (user + network namespace) | Needs unprivileged user namespaces. Ubuntu 24.04+ restricts them via AppArmor; if the installer warns, allow them (`sudo sysctl kernel.apparmor_restrict_unprivileged_userns=0`) or add an AppArmor profile |
+| macOS | `sandbox-exec` with a deny-network profile | Built in; Apple marks it deprecated, but it still ships |
+| Windows | none | Code refuses to run unless you opt in (the installer asks; `--allow-unsandboxed`). For full isolation install inside **WSL** with `install.sh` |
+
+Resource limits (CPU, memory, file size) apply on Linux and macOS. The environment is scrubbed and there's a timeout everywhere. The static safety scan rejects network code on every OS.
+
+**Your data stays local.** `store/` (sessions, ratings, usage) is git-ignored, so a fresh install starts with an empty store. Learned artifacts (`scripts/`, `mcp_tools/tools/`, `registry.json`, `patterns/`, `generated/`) are in git and come with the clone.
+
 ## Phase 1: Capture
 
 | Piece | What it does |
@@ -179,9 +221,9 @@ Drafts produced overnight still wait for `review/cli.py approve`.
 
 **Not a hosted server.** It's a local Python script (standard library only) that Claude Code starts as a child process when a session begins. They talk over stdin/stdout, one JSON-RPC message per line (the MCP stdio transport), and the script exits when the session ends. No port, no daemon, no network.
 
-**Register it once:**
+**Register it once:** the installer does this. By hand:
 ```bash
-claude mcp add --scope user learned -- python3 /home/user/claude-learning-harness/mcp_tools/server.py
+claude mcp add --scope user learned -- python3 /path/to/claude-learning-harness/mcp_tools/server.py
 ```
 That makes it available in every project. Sessions inside this repo also pick it up from `.mcp.json` (project scope); interactive sessions ask you to approve project servers the first time. Check with `claude mcp list`.
 
@@ -189,7 +231,7 @@ That makes it available in every project. Sessions inside this repo also pick it
 - `tools/list` returns the `tool` entries in `registry.json`, with their schema and a description that says how many past sessions they were learned from. The registry is re-read on every request, and a `notifications/tools/list_changed` message is sent when it changes, so approving or uninstalling a tool reaches running sessions.
 - `tools/call`:
   1. checks the arguments against the schema (unknown keys and values starting with `-` are rejected)
-  2. runs the tool in the project directory (`$CLAUDE_PROJECT_DIR`) without network (`unshare -rn`), with a scrubbed environment, CPU/memory/file-size limits and a 60s timeout
+  2. runs the tool in the project directory (`$CLAUDE_PROJECT_DIR`) without network (see the sandbox table under Installation), with a scrubbed environment, resource limits and a 60s timeout
   3. returns stdout/stderr, with `isError` set on a non-zero exit
   4. appends a usage line (`via: "mcp"`, exit code, Claude's session id, never arguments) to `store/usage/<tool>.jsonl` for Phase 5
 - Protocol versions `2025-11-25`, `2025-06-18`, `2025-03-26` and `2024-11-05`.

@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import os
 import shlex
+import shutil
 import subprocess
 import tempfile
 
@@ -27,7 +28,8 @@ class ClaudeError(RuntimeError):
 def run_structured(prompt: str, schema: dict, *, system: str, model: str | None = None,
                    max_budget_usd: float = 0.50, timeout: int = 300) -> tuple[dict, float]:
     """Return (structured_output, cost_usd)."""
-    exe = shlex.split(os.environ.get("LEARNING_HARNESS_CLAUDE_CMD", "claude"))
+    override = os.environ.get("LEARNING_HARNESS_CLAUDE_CMD")
+    exe = shlex.split(override, posix=os.name != "nt") if override else [shutil.which("claude") or "claude"]
     cmd = exe + [
         "-p", "--output-format", "json",
         "--tools", "",
