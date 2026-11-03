@@ -2,7 +2,7 @@
   "name": "release-notes-generation",
   "type": "skill",
   "pattern_key": "release-notes-generation",
-  "status": "validated",
+  "status": "installed",
   "description": "Write user-facing RELEASE_NOTES.md for the changes since the last git tag, grouped by security, features, improvements, fixes and docs, omitting internal-only changes.",
   "spec": "Skill that drafts user-facing release notes since the latest git tag. Judgment (what users notice, wording, grouping) is in SKILL.md; a bundled script scripts/classify_commits.py deterministically pre-classifies `git log --oneline` lines (stdin or file) into JSON categories: security, feature, improvement, fix, docs, dependency, internal, unknown. Rules from accepted sessions and user feedback: omit refactor/chore/ci/test/rename/internal commits and dependency bumps unless users would notice them; put security fixes first; no invented version number.",
   "type_deviation_reason": "",
@@ -102,5 +102,10 @@
     }
   ],
   "created_at": "2026-11-03T09:11:50+00:00",
-  "cost_usd": 0.093
+  "cost_usd": 0.093,
+  "decision": {
+    "decision": "approved",
+    "at": "2026-11-03T09:15:17+00:00",
+    "note": "approved by the user in chat"
+  }
 }

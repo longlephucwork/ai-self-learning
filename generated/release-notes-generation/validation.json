@@ -1,5 +1,5 @@
 {
-  "validated_at": "2026-11-03T09:11:23+00:00",
+  "validated_at": "2026-11-03T09:15:17+00:00",
   "network_isolated": true,
   "tests": [
     {
@@ -111,7 +111,7 @@
       ],
       "reason": "Following the skill would produce essentially the accepted output. The content, section selection, omissions and one-line reply all match. The only differences are the heading wording and a version-number reminder in the reply, and neither is likely to bother the user.",
       "cost_usd": 0.0237,
-      "cached": false
+      "cached": true
     },
     {
       "session_id": "661a0670-6993-4e52-9fca-ba8d2485f9d1",
@@ -161,7 +161,7 @@
       ],
       "reason": "Following the skill would give the corrected behaviour. Security comes first, and the dependency upgrade, CI and test commits are omitted. The 500-character limit gets its user action, and the version number is not invented. The one-line reply format is also compatible with what the user asked for.",
       "cost_usd": 0.0224,
-      "cached": false
+      "cached": true
     },
     {
       "session_id": "ff8a9666-346e-4f83-be2f-f2d25278a687",
@@ -201,7 +201,7 @@
       ],
       "reason": "The skill's rules match the accepted output: correct tag, section structure, omission of internal commits, user-benefit wording, and a one-sentence reply. The only difference is a mention that the version number must be added, which is minor.",
       "cost_usd": 0.0196,
-      "cached": false
+      "cached": true
     }
   ],
   "passed": true,

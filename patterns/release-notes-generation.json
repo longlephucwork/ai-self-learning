@@ -2,7 +2,7 @@
   "key": "release-notes-generation",
   "label": "Release notes from commits since last tag",
   "description": "Write user-facing release notes for changes since the last release tag, grouping features and fixes into markdown and omitting internal-only changes. Uses git history plus changelog and README.",
-  "status": "proposed",
+  "status": "installed",
   "n_sessions": 3,
   "n_success": 3,
   "success_outcomes": [
@@ -27,5 +27,10 @@
     "at": "2026-11-03T09:11:50+00:00",
     "passed": true
   },
-  "proposal": "generated/release-notes-generation"
+  "proposal": "generated/release-notes-generation",
+  "installed": {
+    "name": "release-notes-generation",
+    "version": 1,
+    "at": "2026-11-03T09:15:17+00:00"
+  }
 }
