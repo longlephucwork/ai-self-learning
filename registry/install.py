@@ -97,6 +97,20 @@ def _save_registry(reg: dict) -> None:
     store.write_json_atomic(registry_path(), reg)
 
 
+def _rel(p: Path) -> str:
+    """Repo-relative path when inside the install root, so the repo can be moved or re-cloned."""
+    p = Path(p).resolve()
+    try:
+        return p.relative_to(install_root()).as_posix()
+    except ValueError:
+        return str(p)
+
+
+def resolve(p: str) -> Path:
+    q = Path(p)
+    return q if q.is_absolute() else install_root() / q
+
+
 def file_hashes(files: dict[str, str]) -> dict[str, str]:
     return {p: hashlib.sha256(c.encode("utf-8")).hexdigest()[:16] for p, c in sorted(files.items())}
 
@@ -197,7 +211,7 @@ def install(proposal: dict, files: dict[str, str], *, draft_dir: Path, note: str
         "tests_passed": sum(t["passed"] for t in validation.get("tests", [])),
         "tests_total": len(validation.get("tests", [])),
         "approved_at": store.now(), "approval_note": note,
-        "draft": str(draft_dir),
+        "draft": _rel(draft_dir),
     }
     if kind == "script":
         entry["shim"] = write_shim(entry).relative_to(install_root()).as_posix()

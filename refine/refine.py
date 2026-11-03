@@ -194,7 +194,7 @@ def revision_input(entry: dict) -> dict:
     base = reg.install_root() / entry["path"]
     files = {p.relative_to(base).as_posix(): p.read_text(encoding="utf-8") for p in sorted(base.rglob("*"))
              if p.is_file()}
-    draft = store.read_json(Path(entry["draft"]) / "proposal.json") or {}
+    draft = store.read_json(reg.resolve(entry["draft"]) / "proposal.json") or {}
     failures = []
     for u in collect_uses(entry):
         if not u["failed"]:
