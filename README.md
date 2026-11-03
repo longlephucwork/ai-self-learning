@@ -9,12 +9,24 @@ Status: **Phase 1 (Capture) is done.** The files for Phases 2–5 are stubs.
 
 | Piece | What it does |
 |---|---|
-| `hooks/log_session.py` | Hook entry point. It reads the hook JSON from stdin, parses the transcript, redacts secrets, upserts into `store/sessions.db` and writes a redacted gzip copy to `store/transcripts/`. |
+| `hooks/log_session.py` | Hook entry point. It reads the hook JSON from stdin, parses the transcript, redacts secrets, and writes `store/sessions/<id>/session.json` plus a redacted `transcript.jsonl.gz`. |
 | `hooks/install_hooks.py` | Merges the hooks into user or project `settings.json`. It is idempotent and has `--uninstall`. |
 | `harness_lib/transcript.py` | Lenient JSONL parser. It extracts user requests, tool steps (input, error flag, result preview), files touched and the final result. Sidechain/subagent lines are counted but not mixed into the main flow. |
 | `harness_lib/redact.py` | Pattern-based redaction plus a literal-value check against secret-looking env vars. It runs on everything before storage. |
-| `harness_lib/db.py` | SQLite schema: `sessions`, `requests`, `steps`, `files_touched`, `outcomes` (append-only), `hook_events`. It also creates the empty `summaries`, `patterns` and `proposals` tables reserved for later phases. |
+| `harness_lib/store.py` | Plain-file store: no database, no server. JSON/JSONL only (layout below). |
 | `review/cli.py` | `list`, `show`, `rate`, `stats`. |
+
+### Storage layout (plain files)
+```
+store/                                 # git-ignored: personal session data
+  sessions/<session_id>/
+    session.json         # metadata, requests, tool steps, files touched, final result
+    transcript.jsonl.gz  # redacted copy of the full transcript
+    ratings.jsonl        # append-only outcome history; the last line wins
+  hook_events.jsonl      # append-only log of Stop / SessionEnd / backfill events
+  hook_errors.log
+```
+Only the hook writes `session.json`, and only `review/cli.py rate` writes `ratings.jsonl`, so they never race. `session.json` is updated under a per-session `flock` and replaced by atomic rename. Appends to the JSONL files use one `O_APPEND` write per line. Everything can be read with `cat`, `jq` or an editor.
 
 ### Hook design (checked against the Claude Code hooks docs, Nov 2026)
 - **Stop** fires after every turn and ingests the whole session again (idempotent). Data survives even when a session is killed without a clean exit, which is common in cloud containers. It takes `last_assistant_message` from the payload because the docs say the transcript may lag at Stop time. It skips when `stop_hook_active` is true.

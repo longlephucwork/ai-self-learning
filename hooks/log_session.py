@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Claude Code hook: ingest a session transcript into the learning-harness store.
+"""Claude Code hook: ingest a session transcript into the learning-harness file store (store/sessions/<id>/).
 
 Wired to both Stop (fires after every turn, so data survives sessions that are
 killed without a clean exit) and SessionEnd (records end time + reason).
@@ -22,12 +22,13 @@ import gzip
 import json
 import os
 import sys
+import tempfile
 import traceback
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from harness_lib import db  # noqa: E402
+from harness_lib import store  # noqa: E402
 from harness_lib.redact import redact_obj  # noqa: E402
 from harness_lib.transcript import parse_transcript  # noqa: E402
 
@@ -43,11 +44,11 @@ def _strip(obj):
 
 
 def copy_transcript(src: str, session_id: str) -> str:
-    """Write a redacted, gzipped copy of the transcript into the store."""
-    out_dir = db.store_dir() / "transcripts"
-    out_dir.mkdir(parents=True, exist_ok=True)
-    dst = out_dir / f"{session_id}.jsonl.gz"
-    tmp = dst.with_suffix(".tmp")
+    """Write a redacted, gzipped copy of the transcript into the session's folder."""
+    dst = store.session_dir(session_id, create=True) / "transcript.jsonl.gz"
+    # unique temp name: Stop and SessionEnd can ingest the same session concurrently
+    fd, tmp = tempfile.mkstemp(dir=dst.parent, prefix=".transcript.", suffix=".tmp")
+    os.close(fd)
     with open(src, encoding="utf-8", errors="replace") as fin, gzip.open(tmp, "wt", encoding="utf-8") as fout:
         for line in fin:
             line = line.strip()
@@ -63,8 +64,7 @@ def copy_transcript(src: str, session_id: str) -> str:
 
 
 def ingest(transcript_path: str, *, hook_event: str | None = None, end_reason: str | None = None,
-           session_id: str | None = None, last_assistant_message: str | None = None,
-           con=None) -> str | None:
+           session_id: str | None = None, last_assistant_message: str | None = None) -> str | None:
     transcript_path = os.path.expanduser(transcript_path)
     if not os.path.isfile(transcript_path):
         raise FileNotFoundError(transcript_path)
@@ -72,23 +72,17 @@ def ingest(transcript_path: str, *, hook_event: str | None = None, end_reason: s
     s.session_id = session_id or s.session_id or Path(transcript_path).stem
     if not s.requests and not s.steps:
         return None  # empty / metadata-only transcript
-    copy = copy_transcript(transcript_path, s.session_id)
+    copy_transcript(transcript_path, s.session_id)
     lam = redact_obj(last_assistant_message) if last_assistant_message else None
-    own = con is None
-    con = con or db.connect()
-    try:
-        db.upsert_session(con, s, transcript_path=transcript_path, transcript_copy=copy,
-                          hook_event=hook_event, end_reason=end_reason, last_assistant_message=lam)
-    finally:
-        if own:
-            con.close()
+    store.upsert_session(s, transcript_path=transcript_path, hook_event=hook_event,
+                         end_reason=end_reason, last_assistant_message=lam)
     return s.session_id
 
 
 def _log_error(msg: str) -> None:
     try:
-        with open(db.store_dir() / "hook_errors.log", "a") as fh:
-            fh.write(f"{db.now()} {msg}\n")
+        with open(store.store_dir() / "hook_errors.log", "a") as fh:
+            fh.write(f"{store.now()} {msg}\n")
     except Exception:
         pass
 
@@ -126,17 +120,15 @@ def main() -> int:
             print(ingest(args.transcript, hook_event="manual"))
         elif args.backfill:
             root = Path(os.path.expanduser(args.backfill))
-            con = db.connect()
             n = 0
             for p in sorted(root.rglob("*.jsonl")):
                 if "subagents" in p.parts:
                     continue
                 try:
-                    if ingest(str(p), hook_event="backfill", con=con):
+                    if ingest(str(p), hook_event="backfill"):
                         n += 1
                 except Exception as e:  # keep going
                     print(f"skip {p}: {e}", file=sys.stderr)
-            con.close()
             print(f"ingested {n} sessions from {root}")
         else:
             return hook_main()
