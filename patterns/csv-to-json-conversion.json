@@ -35,8 +35,7 @@
   "proposal": "generated/csv-to-json",
   "installed": {
     "name": "csv-to-json",
-    "version": 1,
-    "at": "2026-11-03T04:15:09+00:00"
-  },
-  "pending_revision": "generated/csv-to-json-v2"
+    "version": 2,
+    "at": "2026-11-03T04:34:02+00:00"
+  }
 }

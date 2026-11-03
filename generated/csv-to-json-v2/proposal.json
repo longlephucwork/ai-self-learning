@@ -2,7 +2,7 @@
   "name": "csv-to-json",
   "type": "script",
   "pattern_key": "csv-to-json-conversion",
-  "status": "validated",
+  "status": "installed",
   "description": "Convert a CSV file with a header row into a JSON array of objects. Numbers are typed; delimiter (comma, semicolon, tab, pipe) is auto-detected or set explicitly.",
   "spec": "CLI: csv_to_json.py INPUT OUTPUT [--delimiter D]. Reads INPUT CSV (utf-8, header row), writes OUTPUT as a JSON array of objects (indent 2, ensure_ascii=False, trailing newline), prints 'Wrote N rows to OUTPUT'. Integer strings (-?0|[1-9]\\d*) become ints, decimals (-?\\d+\\.\\d+) become floats, everything else stays a string (accepted sessions typed numbers; the one session that kept strings was edited to want numbers). Blank rows are skipped; short rows are padded with ''. A row with more cells than headers is an error (exit 1, 'error: row N has more cells than headers') and no output is written. Missing/empty header -> exit 1. Revision: delimiter auto-detection (default --delimiter auto): the header record is parsed with each of , ; tab | and the delimiter yielding the most fields wins; ties (including single-column files) fall back to comma. --delimiter accepts a single character, or 'tab', 'comma', 'semicolon', 'pipe'. Fixes semicolon-delimited files being read as one merged field.",
   "type_deviation_reason": "",
@@ -252,5 +252,10 @@
     "name": "csv-to-json",
     "version": 1,
     "failures": 2
+  },
+  "decision": {
+    "decision": "approved",
+    "at": "2026-11-03T04:34:02+00:00",
+    "note": "approved by the user in chat"
   }
 }
