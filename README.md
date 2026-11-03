@@ -27,7 +27,16 @@ Use Claude Code as usual. In the background, the harness:
 
 At most once a day, within $5/month. When a draft is ready, Claude mentions it at the start of your next session. Say yes to see it, then yes again to install it.
 
-**Learn right away:** say **"learn this"** in any session. Claude drafts a skill, script or tool from that one session, and asks before installing it.
+**Learn right away:** say **"learn this"** in any session to learn from that one session. Claude asks before installing anything.
+
+**Skills are built with [skill-creator](https://github.com/anthropics/skills).** The harness never writes a skill itself. When a task needs judgment, it prepares a brief from your sessions: what you asked, what you accepted, your corrections, and ready-made test cases. Claude then offers to build the skill with skill-creator, together with you. Scripts and tools are drafted and tested by the harness.
+
+**Claude uses what it learned.** In Claude Code:
+- skills load from `~/.claude/skills/`
+- tools appear through the MCP server
+- installed scripts are listed for Claude at the start of every session, with the exact command to run them
+
+The Claude desktop and web apps don't load these.
 
 **Muscle memory:** a skill you use often and accurately, for a task that's mechanical, gets proposed as a tool. Claude then just calls it instead of reasoning through the task each time. If the tool starts failing, `refine.py demote` brings the skill back. Tasks that need judgment stay skills.
 
@@ -38,6 +47,7 @@ You can also do it all by hand. Run these from `~/claude-learning-harness` (on W
 | `python3 review/cli.py proposals` | drafts waiting for you |
 | `python3 review/cli.py review <name>` | the evidence, code and checks for one draft |
 | `python3 review/cli.py approve <name>` | install it |
+| `python3 review/cli.py adopt <name>` | check a skill built with skill-creator from a brief, making it a draft |
 | `python3 review/cli.py reject <name> --reason "..."` | drop it; that task won't be proposed again |
 | `python3 review/cli.py rate last accepted` | rate your last session yourself (`accepted`, `edited` or `redone`); this overrides the automatic rating |
 | `python3 refine/refine.py learn` | learn from your last session now (what "learn this" runs) |

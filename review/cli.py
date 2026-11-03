@@ -14,6 +14,7 @@ Phase 4 commands (proposals from generated/):
   revalidate <draft>                re-run validation after hand-editing a draft's files/tests
   approve <draft> [--note TEXT] [--yes]   re-validate, then install + git commit (asks you to confirm)
   reject <draft> --reason TEXT      lock the pattern as rejected so it is never re-proposed
+  adopt <brief> [--from DIR]        a skill built with skill-creator from a brief -> validated draft
 """
 from __future__ import annotations
 
@@ -221,7 +222,9 @@ def cmd_revalidate(args):
     pattern = store.load_pattern(proposal["pattern_key"])
     rep = replay.validate_draft(proposal, files, pattern, previous=store.read_json(d / "validation.json"))
     for f in blocking(scan_files(files)):
-        rep["problems"].append(f"safety scan: {f['kind']} in {f['file']}:{f['line']} ({f['detail']})")
+        msg = f"safety scan: {f['kind']} in {f['file']}:{f['line']} ({f['detail']})"
+        if msg not in rep["problems"]:
+            rep["problems"].append(msg)
     rep["passed"] = not rep["problems"]
     store.write_json_atomic(d / "validation.json", rep)
     proposal["status"] = "validated" if rep["passed"] else "failed_validation"
@@ -245,7 +248,9 @@ def cmd_approve(args):
     rep = replay.validate_draft(proposal, files, pattern, previous=store.read_json(d / "validation.json"))
     bl = blocking(scan_files(files))
     for f in bl:
-        rep["problems"].append(f"safety scan: {f['kind']} in {f['file']}:{f['line']} ({f['detail']})")
+        msg = f"safety scan: {f['kind']} in {f['file']}:{f['line']} ({f['detail']})"
+        if msg not in rep["problems"]:
+            rep["problems"].append(msg)
     rep["passed"] = not rep["problems"]
     store.write_json_atomic(d / "validation.json", rep)
     replay.print_report(rep)
@@ -299,6 +304,77 @@ def cmd_approve(args):
     return 0
 
 
+def cmd_adopt(args):
+    """Turn a skill that skill-creator built from a brief into a validated draft."""
+    from refine.brief import briefs_dir, target_dir
+    name = args.brief
+    bdir = briefs_dir() / name
+    meta = store.read_json(bdir / "brief.json")
+    if not meta:
+        raise LookupError(f"no skill brief {name!r} (see learned/briefs/)")
+    target = target_dir(name)
+    src = Path(args.source).resolve() if args.source else target
+    if not (src / "SKILL.md").is_file():
+        raise LookupError(f"no SKILL.md in {src}: build the skill with skill-creator first (BRIEF.md: {bdir / 'BRIEF.md'})")
+    files, skipped = {}, []
+    for p in sorted(src.rglob("*")):
+        rel = p.relative_to(src)
+        if not p.is_file() or set(rel.parts) & {"__pycache__", ".git", "node_modules"} or rel.name == ".DS_Store" \
+                or any(part.endswith("-workspace") for part in rel.parts):
+            continue
+        try:
+            if p.stat().st_size > 1_000_000:
+                raise ValueError("over 1 MB")
+            files[rel.as_posix()] = p.read_text(encoding="utf-8")
+        except (UnicodeDecodeError, ValueError) as e:
+            skipped.append(f"{rel.as_posix()} ({'binary' if isinstance(e, UnicodeDecodeError) else e})")
+    if skipped:
+        raise LookupError("the harness only adopts text files; remove or convert: " + ", ".join(skipped[:10]))
+    if src != target:
+        import shutil
+        shutil.rmtree(target, ignore_errors=True)
+        for rel, content in files.items():
+            (target / rel).parent.mkdir(parents=True, exist_ok=True)
+            (target / rel).write_text(content, encoding="utf-8")
+    pattern = store.load_pattern(meta["pattern_key"])
+    if not pattern:
+        raise LookupError(f"pattern {meta['pattern_key']!r} not found")
+    fm, _ = replay._frontmatter(files["SKILL.md"])
+    proposal = {"name": name, "type": "skill", "pattern_key": meta["pattern_key"], "status": "draft",
+                "created_by": "skill-creator", "description": str((fm or {}).get("description", ""))[:1024],
+                "spec": f"built with skill-creator from learned/briefs/{name}/BRIEF.md", "entrypoint": "",
+                "type_deviation_reason": "", "file_list": sorted(files), "tests": [],
+                "scan_flags": scan_files({k: v for k, v in files.items() if not k.startswith("evals/")}),
+                "evidence": {"sessions": meta["sessions"], "n_success": len(meta["sessions"]),
+                             "n_sessions": pattern.get("n_sessions")},
+                "quick": meta.get("quick", False), "created_at": store.now()}
+    if meta.get("improve"):
+        proposal["revision_of"] = meta["improve"]
+    d = replay.drafts_dir() / name
+    previous = store.read_json(d / "validation.json")
+    store.write_json_atomic(d / "proposal.json", proposal)
+    rep = replay.validate_draft(proposal, files, pattern, previous=previous)   # includes the safety scan
+    rep["passed"] = not rep["problems"]
+    store.write_json_atomic(d / "validation.json", rep)
+    proposal["status"] = "validated" if rep["passed"] else "failed_validation"
+    store.write_json_atomic(d / "proposal.json", proposal)
+    if rep["passed"]:
+        store.write_json_atomic(bdir / "brief.json", {**meta, "status": "adopted", "adopted_at": store.now()})
+        if not meta.get("improve"):
+            pattern["status"] = "proposed"
+            pattern["proposal"] = name
+            store.save_pattern(pattern)
+    replay.print_report(rep)
+    oc = rep.get("official_check") or {}
+    print(f"skill-creator's checker: {oc.get('message', 'not run')}")
+    if rep["passed"]:
+        print(f"\nadopted {name} as a draft. Review: python3 review/cli.py review {name}   "
+              f"approve: python3 review/cli.py approve {name}")
+        return 0
+    print("\nnot adopted yet: fix the problems above (with skill-creator), then run adopt again", file=sys.stderr)
+    return 1
+
+
 def cmd_reject(args):
     proposal, _, d = _draft(args.draft)
     if proposal["status"] == "installed":
@@ -325,6 +401,9 @@ def main(argv=None):
     p = sub.add_parser("approve"); p.add_argument("draft"); p.add_argument("--note")
     p.add_argument("--yes", action="store_true", help="skip the interactive confirmation")
     p.add_argument("--no-git", action="store_true"); p.set_defaults(fn=cmd_approve)
+    p = sub.add_parser("adopt", help="turn a skill built with skill-creator from a brief into a draft")
+    p.add_argument("brief"); p.add_argument("--from", dest="source", help="skill folder, if not the brief's target")
+    p.set_defaults(fn=cmd_adopt)
     p = sub.add_parser("reject"); p.add_argument("draft"); p.add_argument("--reason", required=True)
     p.add_argument("--no-git", action="store_true"); p.set_defaults(fn=cmd_reject)
     args = ap.parse_args(argv)

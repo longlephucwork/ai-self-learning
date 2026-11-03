@@ -154,12 +154,13 @@ class Phase4(unittest.TestCase):
         self.assertIn("scripts/csv-to-json/csv_to_json.py", git(self.repo, "show", "--name-only", "--format=", "HEAD"))
 
     def test_skill_install_symlinks_and_tool_target(self):
-        self.make_pattern("notes", 0.0, "skill")
-        skill = {"type": "skill", "type_deviation_reason": "", "name": "tidy-notes", "description": "Tidy notes",
-                 "spec": "s", "entrypoint": "", "tool_input_schema_json": "",
-                 "files": [{"path": "SKILL.md", "content": SKILL_MD}],
-                 "tests": []}   # no bundled scripts -> no tests; evidence comes from the judged checks
-        self.draft(skill, key="notes")
+        self.make_pattern("tidy-notes", 0.0, "skill")
+        from refine.brief import write_brief                     # skills are built with skill-creator from a brief
+        b = write_brief("tidy-notes")
+        Path(b["target"]).mkdir(parents=True, exist_ok=True)
+        (Path(b["target"]) / "SKILL.md").write_text(SKILL_MD)    # what skill-creator would write
+        rc, out = self.cli("adopt", "tidy-notes")
+        self.assertEqual(rc, 0, out)
         rc, out = self.cli("approve", "tidy-notes", "--yes")
         self.assertEqual(rc, 0, out)
         link = Path(os.environ["LEARNING_HARNESS_SKILLS_DIR"]) / "tidy-notes"

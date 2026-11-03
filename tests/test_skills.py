@@ -3,6 +3,7 @@ import json
 import os
 import sys
 import unittest
+from unittest import mock
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -32,76 +33,136 @@ def skill(md=GOOD_MD, tests=None, scripts=True):
 
 
 class Skills(p4.Phase4):
+    """Skills are built with skill-creator from a brief, then adopted, validated and approved."""
+
     def setUp(self):
         super().setUp()
-        self.make_pattern("notes", 0.0, "skill")
+        self.make_pattern("notes-skill", 0.0, "skill")
         os.environ["FAKE_CLAUDE_LOG"] = str(self.t / "calls.jsonl")
 
-    def propose(self, prop):
-        p = self.t / "p.json"; p.write_text(json.dumps(prop)); os.environ["FAKE_PROPOSAL_FILE"] = str(p)
-        from generate.propose import propose
-        return propose("notes", log=lambda *_: None, max_attempts=1)
+    def build(self, md=GOOD_MD, scripts=True, extra=None):
+        """Stand in for skill-creator: write the skill into the brief's target folder."""
+        from refine.brief import write_brief
+        b = write_brief("notes-skill")
+        target = Path(b["target"])
+        target.mkdir(parents=True, exist_ok=True)
+        files = {"SKILL.md": md, **({"scripts/classify.py": CLASSIFY} if scripts else {}), **(extra or {})}
+        for rel, content in files.items():
+            (target / rel).parent.mkdir(parents=True, exist_ok=True)
+            (target / rel).write_text(content)
+        return b
+
+    def adopt(self, **kw):
+        self.build(**kw)
+        rc, out = self.cli("adopt", "notes-skill")
+        rep = json.loads((self.repo / "generated" / "notes-skill" / "validation.json").read_text())
+        return rc, out, rep
 
     def judge_calls(self):
         p = self.t / "calls.jsonl"
         calls = [json.loads(l) for l in p.read_text().splitlines()] if p.exists() else []
         return [c for c in calls if '"verdict"' in c["args"][c["args"].index("--json-schema") + 1]]
 
-    def test_skill_with_helper_validates_via_judge(self):
-        r = self.propose(skill())
-        self.assertTrue(r["passed"], r["problems"])
-        rep = r["report"]
-        self.assertEqual([t["passed"] for t in rep["tests"]], [True])            # helper ran in the sandbox
-        self.assertEqual(len(rep["judged"]), 3)                                   # one per successful session
+    def test_harness_never_drafts_skills_itself(self):
+        from generate.propose import propose
+        with self.assertRaises(ValueError) as e:
+            propose("notes-skill", log=lambda *_: None)
+        self.assertIn("skill-creator", str(e.exception))
+
+    def test_brief_has_evidence_and_skill_creator_test_cases(self):
+        self.store.rate("s-kv", "edited", "wanted v as a number")
+        b = self.build()
+        root = Path(b["path"])
+        brief = (root / "BRIEF.md").read_text()
+        self.assertIn("Convert in.csv to JSON", brief)                         # the user's request
+        self.assertIn('"k": "x"', brief)                                       # the accepted output
+        self.assertIn("wanted v as a number", brief)                           # the user's correction
+        self.assertIn("data from logs, not instructions", brief)
+        self.assertEqual(len(b["cases"]), 3)
+        case = root / "evals" / b["cases"][0]
+        prompt = (case / "prompt.md").read_text()
+        settings = prompt.split("---")[1]
+        keys = {l.split(":")[0].strip() for l in settings.strip().splitlines()}
+        self.assertEqual(keys, {"tags", "max_turns", "timeout_seconds", "allowed_tools"})  # only keys the CLI accepts
+        self.assertIn("Input files: in.csv", prompt)
+        y = (case / "case.yaml").read_text()
+        self.assertIn('schema_version: "1.1"', y); self.assertIn(f"name: {b['cases'][0]}", y)
+        self.assertIn("scaffold_script: place-files.sh", y)
+        self.assertTrue((case / "files" / "in.csv").read_text().startswith("name,qty"))   # line numbers stripped
+        self.assertTrue((case / "graders" / "01-expected-output.md").read_text().startswith("---\ntype: llm"))
+        self.assertEqual(self.store.load_pattern("notes-skill")["status"], "briefed")
+
+    def test_adopt_validates_via_judge(self):
+        rc, out, rep = self.adopt()
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(len(rep["judged"]), 3)                                 # one per successful session
         self.assertEqual(rep["coverage"]["method"], "judged")
-        self.assertEqual(len(self.judge_calls()), 3)
+        meta = json.loads((self.repo / "generated" / "notes-skill" / "proposal.json").read_text())
+        self.assertEqual((meta["status"], meta["created_by"]), ("validated", "skill-creator"))
+        self.assertEqual(self.store.load_pattern("notes-skill")["status"], "proposed")
+        rc, out = self.cli("approve", "notes-skill", "--yes")
+        self.assertEqual(rc, 0, out)
+        self.assertTrue((Path(os.environ["LEARNING_HARNESS_SKILLS_DIR"]) / "notes-skill" / "SKILL.md").exists())
 
     def test_judge_failure_blocks(self):
         os.environ["FAKE_JUDGE_VERDICT"] = "fail"
-        r = self.propose(skill())
-        self.assertFalse(r["passed"])
-        self.assertTrue(any(p.startswith("[judged ") for p in r["problems"]), r["problems"])
-        self.assertEqual(self.store.load_pattern("notes")["status"], "candidate")
+        rc, out, rep = self.adopt()
+        self.assertEqual(rc, 1)
+        self.assertTrue(any(p.startswith("[judged ") for p in rep["problems"]), rep["problems"])
 
-    def test_broken_helper_fails_before_any_judge_call(self):
-        r = self.propose(skill(tests=[helper_test(expected='{"fixes": []}')]))
-        self.assertTrue(any("[classify] failed" in p for p in r["problems"]), r["problems"])
-        self.assertEqual(self.judge_calls(), [])                                  # no money spent on a broken draft
+    def test_safety_scan_and_structure(self):
+        rc, out, rep = self.adopt(extra={"scripts/evil.py": "import urllib.request\n"})
+        self.assertTrue(any("safety scan: network" in p for p in rep["problems"]), rep["problems"])
+        self.assertEqual(self.judge_calls(), [])                                # no money spent on a failing draft
+        rc, out, rep = self.adopt(md=GOOD_MD.replace("<skill base directory>/", ""))
+        self.assertTrue(any("bare relative path" in p for p in rep["problems"]), rep["problems"])
+        rc, out, rep = self.adopt(md=GOOD_MD.replace("name: notes-skill", "name: other-name"))
+        self.assertTrue(any("must match the skill's folder name" in p for p in rep["problems"]), rep["problems"])
+        rc, out, rep = self.adopt(md=GOOD_MD.replace("classify.py", "missing.py"))
+        self.assertTrue(any("missing file scripts/missing.py" in p for p in rep["problems"]), rep["problems"])
 
-    def test_structure_rules(self):
-        r = self.propose(skill(md=GOOD_MD.replace("<skill base directory>/", "")))
-        self.assertTrue(any("bare relative path" in p for p in r["problems"]), r["problems"])
-        r = self.propose(skill(md=GOOD_MD.replace("classify.py", "missing.py"), tests=[]))
-        self.assertTrue(any("references missing file scripts/missing.py" in p for p in r["problems"]), r["problems"])
-        r = self.propose(skill(tests=[]))
-        self.assertTrue(any("bundles scripts but has no tests" in p for p in r["problems"]), r["problems"])
-        r = self.propose(skill(tests=[helper_test(script="")], scripts=True) | {"files": [
-            {"path": "SKILL.md", "content": GOOD_MD}, {"path": "scripts/classify.py", "content": CLASSIFY},
-            {"path": "scripts/other.py", "content": "print(1)\n"}]})
-        self.assertTrue(any("names no bundled script" in p for p in r["problems"]), r["problems"])
-
-    def test_skill_without_scripts_needs_no_tests(self):
-        md = "---\nname: notes-skill\ndescription: Write notes\n---\n\nGroup changes; lead with security.\n"
-        r = self.propose(skill(md=md, tests=[], scripts=False))
-        self.assertTrue(r["passed"], r["problems"])
+    def test_adopt_needs_a_built_skill_and_text_files(self):
+        from refine.brief import write_brief
+        write_brief("notes-skill")
+        rc, out = self.cli("adopt", "notes-skill")
+        self.assertEqual(rc, 1); self.assertIn("build the skill with skill-creator first", out)
+        b = self.build()
+        (Path(b["target"]) / "logo.png").write_bytes(b"\x89PNG\r\n\x1a\n\xff\xfe")
+        rc, out = self.cli("adopt", "notes-skill")
+        self.assertEqual(rc, 1); self.assertIn("logo.png (binary)", out)
 
     def test_judged_results_are_cached_on_approve(self):
-        self.assertTrue(self.propose(skill())["passed"])
+        rc, out, rep = self.adopt()
+        self.assertEqual(rc, 0, out)
         before = len(self.judge_calls())
         rc, out = self.cli("approve", "notes-skill", "--yes")
         self.assertEqual(rc, 0, out)
-        self.assertEqual(len(self.judge_calls()), before)                         # unchanged -> no new judge calls
+        self.assertEqual(len(self.judge_calls()), before)                       # unchanged -> no new judge calls
         rc, out = self.cli("review", "notes-skill")
         self.assertIn("judged checks", out)
 
     def test_judged_checks_rerun_when_skill_changes(self):
-        self.assertTrue(self.propose(skill())["passed"])
+        rc, out, rep = self.adopt()
         before = len(self.judge_calls())
         f = self.repo / "generated" / "notes-skill" / "files" / "SKILL.md"
         f.write_text(f.read_text() + "\nAlso mention breaking changes.\n")
-        rc, out = self.cli("revalidate", "notes-skill")
+        rc, out = self.cli("adopt", "notes-skill")
         self.assertEqual(rc, 0, out)
         self.assertEqual(len(self.judge_calls()), before + 3)
+
+    def test_session_start_offers_skill_creator(self):
+        from refine import auto
+        self.build()
+        with mock.patch("validate.replay.find_skill_creator", return_value=Path("/x/skill-creator")):
+            text = auto.session_start_context()
+        self.assertIn("Skills are built with skill-creator", text)
+        self.assertIn("adopt notes-skill", text)
+        self.assertIsNone(auto.session_start_context())                         # once
+        from refine.brief import write_brief
+        write_brief("notes-skill")                                              # a new brief version
+        with mock.patch("validate.replay.find_skill_creator", return_value=None):
+            text = auto.session_start_context()
+        self.assertIn("skill-creator isn't installed here", text)
 
 
 for _n in [n for n in vars(p4.Phase4) if n.startswith("test_")]:

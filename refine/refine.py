@@ -262,6 +262,7 @@ def main(argv=None):
     p.add_argument("--max-attempts", type=int, default=2)
     p = sub.add_parser("learn"); p.add_argument("session", nargs="?", help="session id or prefix (default: this one)")
     p.add_argument("--model")
+    p = sub.add_parser("brief"); p.add_argument("pattern", help="pattern key to brief for skill-creator")
     p = sub.add_parser("promote"); p.add_argument("name"); p.add_argument("--model")
     p = sub.add_parser("demote"); p.add_argument("name"); p.add_argument("--yes", action="store_true")
     p = sub.add_parser("auto"); p.add_argument("--force", action="store_true", help="ignore the throttle")
@@ -299,6 +300,14 @@ def main(argv=None):
         entry = installed[a.name]
         if entry.get("wraps"):
             sys.exit(f"error: {a.name!r} only wraps the script {entry['wraps']!r}; revise that instead")
+        if entry["type"] == "skill":   # skills are revised with skill-creator, from a brief
+            from refine.brief import write_brief
+            rev = revision_input(entry)
+            b = write_brief(entry["pattern_key"], improve={**entry, "failures": rev["failures"]})
+            print(f"skills are updated with skill-creator. Brief: {b['path']}/BRIEF.md\n"
+                  f"In a Claude Code session say: \"update the {a.name} skill with skill-creator using that brief\", "
+                  f"then run: python3 review/cli.py adopt {a.name}")
+            return 0
         rev = revision_input(entry)
         if not rev["failures"]:
             sys.exit(f"error: no recorded failures for {a.name}; nothing to revise")
@@ -322,6 +331,12 @@ def main(argv=None):
             r = learn(a.session, model=a.model)
         except (LearnError, LookupError, ValueError, ClaudeError) as e:
             sys.exit(f"error: {e}")
+        if r.get("brief"):
+            print(f"\nSKILL BRIEF: {r['brief_path']}/BRIEF.md\n"
+                  f"This task needs judgment, so it becomes a skill, and skills are built with skill-creator. Ask "
+                  f"Claude to build it with skill-creator from that brief, then run: "
+                  f"python3 review/cli.py adopt {r['brief']}")
+            return 0
         name = Path(r["draft"]).name if r.get("draft") else None
         print(f"\n{'VALIDATED' if r['passed'] else 'NOT VALIDATED'}: {r.get('draft') or '(no draft)'}  (${r['cost_usd']:.3f})")
         if r["passed"]:
@@ -330,6 +345,15 @@ def main(argv=None):
             for p in r["problems"][:8]:
                 print("  -", p)
         return 0 if r["passed"] else 1
+    elif a.cmd == "brief":
+        from refine.brief import write_brief
+        try:
+            b = write_brief(a.pattern)
+        except LookupError as e:
+            sys.exit(f"error: {e}")
+        print(f"brief: {b['path']}/BRIEF.md  ({len(b['cases'])} test case(s) for skill-creator)\n"
+              f"build it with skill-creator, writing into {b['target']}/, then: python3 review/cli.py adopt {b['brief']}")
+        return 0
     elif a.cmd == "promote":
         from harness_lib.claude_cli import ClaudeError
         from refine import memory

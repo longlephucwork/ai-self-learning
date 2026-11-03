@@ -112,7 +112,7 @@ If validation passes, the pattern's status becomes `proposed` and it waits for P
 | Safety scan (`harness_lib/scan.py`) | AST/regex flags for network, subprocess/eval, environment or credential access, deletion, and absolute or parent paths. Any of these fails validation and is shown to the reviewer. `write_any` is informational only. |
 | Sandbox (`validate/replay.py`) | Each test runs in a fresh temp dir under `unshare -rn` (no network), with `python3 -I`, an environment of only `PATH`/`LANG`/`HOME`, CPU 10s, 512MB memory, 10MB max file size and a 20s timeout. If network isolation is unavailable, it refuses to run unless `--allow-no-netns` is passed. |
 
-**Skills** are validated differently, because a skill is instructions rather than code:
+**Skills are built with skill-creator, never drafted by the harness** (see [Skill briefs](#skill-briefs-refinebriefpy)). `propose.py` refuses skill patterns and skill-type output. When you `adopt` a skill that skill-creator built, it's validated like this, because a skill is instructions rather than code:
 1. **The Claude skill standard.** The rules of `skill-creator`'s `scripts/quick_validate.py`:
    - exactly one `SKILL.md`
    - YAML frontmatter with only `name`, `description`, `license`, `allowed-tools`, `metadata` or `compatibility`
@@ -311,3 +311,43 @@ The harness has two levels, like a person learning a task:
 - **Forgetting:** anything unused for 60 days is suggested for retirement.
 
 The thresholds are in `store/config.json` under `"auto"`. Nothing changes without your approval.
+
+## Skill briefs (`refine/brief.py`)
+
+Every skill is built by **skill-creator**, interactively with you. When a task is worth a skill, the harness writes a brief instead of a skill. That happens when:
+- a candidate pattern is of the `skill` type
+- you run `refine.py learn` (or say "learn this") on a task that needs judgment
+- you run `refine.py revise` on an installed skill
+
+Briefs are written by plain code, with no model call:
+
+```
+learned/briefs/<name>/
+  BRIEF.md       the captured intent: what repeats, each session's request, the output you accepted and your
+                 corrections, the name and trigger phrases, the skill standard, where to write the skill
+  brief.json     bookkeeping (pattern, sessions, status: waiting -> adopted)
+  evals/<case>/  one test case per session in skill-creator's format (prompt.md, case.yaml, graders/,
+                 files/ with the session's real inputs + place-files.sh), ready for its with/without-skill runs
+```
+
+1. **Offer.** At your next session start, or straight after "learn this", Claude mentions the brief and offers to build the skill with skill-creator. If skill-creator isn't installed, Claude says so, and the brief waits.
+2. **Build.** If you say yes, Claude follows skill-creator's own process in your session, with `BRIEF.md` as the captured intent (its evidence is marked as data, not instructions) and the brief's `evals/` as the test cases. It writes the skill into `learned/generated/<name>/files/`.
+3. **Adopt.** `review/cli.py adopt <name>` checks the skill:
+   - the Claude skill standard, plus skill-creator's own `quick_validate.py` when installed
+   - the safety scan, before any paid check
+   - the judged check against your accepted sessions
+   
+   It then makes the skill a normal draft. Bundled scripts don't need harness tests, because skill-creator's evals cover them, but they still go through the safety scan.
+4. **Approve** as usual. It's linked into `~/.claude/skills/`, and usage tracking, promotion to a tool and retirement work as for any learned item.
+
+Updating an installed skill works the same way: `refine.py revise <skill>` writes an "update this skill" brief for skill-creator's *improving an existing skill* flow, listing the observed failures.
+
+## How Claude finds what was learned
+
+| Learned item | How Claude Code sees it |
+|---|---|
+| skill | linked into `~/.claude/skills/<name>`; Claude Code lists it by its description and loads it when a request matches |
+| MCP tool | in Claude's tool list as `mcp__learned__<name>`, through the registered `learned` server |
+| script | listed at the start of every session by the `SessionStart` hook, with its description and the absolute command to run it, so it works even if Claude Code didn't inherit the PATH change |
+
+This is for Claude Code only; the Claude desktop and web apps don't read `~/.claude/skills` or these hooks.

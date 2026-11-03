@@ -61,7 +61,7 @@ def learn(session: str | None = None, *, model: str | None = None, log=print) ->
 
     existing = [p for p in store.iter_patterns() if sid in p.get("session_ids", [])]
     for p in existing:
-        if p["status"] in ("installed", "proposed"):
+        if p["status"] in ("installed", "proposed", "briefed"):
             raise LearnError(f"already learned as pattern {p['key']!r} ({p['status']})")
     if existing and existing[0]["status"] in ("forming", "candidate"):
         key = existing[0]["key"]
@@ -80,6 +80,12 @@ def learn(session: str | None = None, *, model: str | None = None, log=print) ->
                    "session_ids": [sid], "excluded_injection": [], "method": "quick", "quick": True,
                    "created_at": store.now(), "updated_at": store.now()}
     store.save_pattern(pattern)
+    if pattern["suggested_type"] == "skill":
+        from refine.brief import write_brief
+        b = write_brief(key)
+        log(f"this needs judgment, so it becomes a skill; skills are built with skill-creator. Brief: {b['path']}")
+        return {"session": sid, "pattern": key, "brief": b["brief"], "brief_path": b["path"], "passed": None,
+                "cost_usd": 0.0, "draft": None, "problems": []}
     log(f"drafting a {pattern['suggested_type']} from session {sid[:8]} ({key}) ...")
     r = propose(key, model=model, quick=True, log=log)
     return {"session": sid, "pattern": key, **r}

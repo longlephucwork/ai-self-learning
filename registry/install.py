@@ -361,6 +361,23 @@ def uninstall(name: str, *, reason: str | None = None, use_git: bool = True, for
     return None
 
 
+def session_start_context() -> str | None:
+    """Every session: tell Claude which learned scripts exist and exactly how to run them.
+
+    Skills and MCP tools are listed by Claude Code itself; scripts aren't, so without this Claude would
+    redo the job by hand. Absolute paths, so it works even when Claude Code didn't inherit the PATH change."""
+    scripts = [e for e in load_registry()["installed"].values() if e["type"] == "script" and e.get("shim")]
+    if not scripts:
+        return None
+    lines = ["[learning-harness] Scripts learned from this user's own work and approved by them. When a task "
+             "matches one, run it instead of doing the job by hand (it does exactly what the user accepted before; "
+             "add --help to see its arguments):"]
+    for e in sorted(scripts, key=lambda e: e["name"])[:20]:
+        cmd = install_root() / (e["shim"] + (".cmd" if os.name == "nt" else ""))
+        lines.append(f"- {e['name']}: {e['description'][:160]}  Run: {cmd.as_posix()} ARGS")
+    return "\n".join(lines)
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)

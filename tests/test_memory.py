@@ -102,14 +102,13 @@ class Memory(p4.Phase4):
 
     def test_quick_learn_judgment_task_becomes_a_skill(self):
         sid, _, _ = self.fresh_session("q-skill", request_csv=False)
-        md = "---\nname: repo-explainer\ndescription: Explain a repo\n---\n\nRead the README first.\n"
-        self.fake({"type": "skill", "type_deviation_reason": "", "name": "repo-explainer", "description": "x",
-                   "spec": "s", "entrypoint": "", "tool_input_schema_json": "",
-                   "files": [{"path": "SKILL.md", "content": md}], "tests": []})
         from refine.learn import learn
         r = learn(sid, log=lambda *_: None)
-        self.assertTrue(r["passed"], r["problems"])
         self.assertEqual(self.store.load_pattern(r["pattern"])["suggested_type"], "skill")
+        self.assertTrue(r["brief"])                                    # skills: a brief for skill-creator, no draft
+        self.assertIsNone(r["draft"])
+        self.assertTrue((Path(r["brief_path"]) / "BRIEF.md").exists())
+        self.assertEqual(self.store.load_pattern(r["pattern"])["status"], "briefed")
 
     def test_min_success_setting_makes_single_sessions_candidates(self):
         from detect import cluster as cl
@@ -261,7 +260,8 @@ class Memory(p4.Phase4):
             installer.setup_builtin_skill()
             md = (home / ".claude" / "skills" / "learning-harness" / "SKILL.md").read_text()
             self.assertIn("refine/refine.py learn", md)
-            self.assertIn("Never approve without their explicit yes", md)
+            self.assertIn("Only if the user explicitly says yes", md)
+            self.assertIn("skill-creator", md)
             self.assertTrue(installer.builtin_skill_installed())
             installer.setup_builtin_skill(uninstall=True)
             self.assertFalse((home / ".claude" / "skills" / "learning-harness").exists())

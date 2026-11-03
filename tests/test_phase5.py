@@ -71,6 +71,15 @@ class Phase5(p4.Phase4):
         st = self.stats()
         self.assertEqual((st["uses"], st["failures"]), (3, 1))
 
+    def test_session_start_tells_claude_about_installed_scripts(self):
+        from registry import install
+        text = install.session_start_context()
+        self.assertIn("csv-to-json: Convert CSV", text)
+        self.assertIn(str(self.repo / "bin" / "csv-to-json"), text)              # absolute path, works without PATH
+        self.assertIn("run it instead of doing the job by hand", text)
+        install.uninstall("csv-to-json")
+        self.assertIsNone(install.session_start_context())
+
     def test_transcript_uses_redone_and_no_double_count(self):
         self.add_session("u-ok", "bin/csv-to-json data.csv data.json", False, "accepted")
         self.add_session("u-err", "python3 scripts/csv-to-json/csv_to_json.py bad.csv o.json", True)

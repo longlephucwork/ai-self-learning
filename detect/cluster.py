@@ -26,7 +26,7 @@ from harness_lib.claude_cli import DEFAULT_MODEL, run_structured  # noqa: E402
 from harness_lib.schema_check import validate  # noqa: E402
 from detect.summarize import slugify  # noqa: E402
 
-LOCKED_STATUSES = {"proposed", "rejected", "installed", "retired"}  # owned by Phases 3-5
+LOCKED_STATUSES = {"proposed", "briefed", "rejected", "installed", "retired"}  # owned by Phases 3-5
 
 CLUSTER_SCHEMA = {
     "type": "object",

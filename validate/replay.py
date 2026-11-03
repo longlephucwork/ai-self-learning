@@ -489,6 +489,9 @@ def validate_skill(proposal: dict, files: dict[str, str], pattern: dict, *, allo
     rep["official_check"] = official_skill_check(files)
     if rep["official_check"]["ran"] and not rep["official_check"]["valid"]:
         P.append(f"skill-creator's quick_validate.py: {rep['official_check']['message']}")
+    from harness_lib.scan import blocking, scan_files   # before any paid judge call
+    for f in blocking(scan_files({k: v for k, v in files.items() if not k.startswith("evals/")})):
+        P.append(f"safety scan: {f['kind']} in {f['file']}:{f['line']} ({f['detail']})")
     for ref in set(re.findall(r"(?<![\w.-])(scripts/[\w./-]+\.\w+)", skill)):
         if ref not in files:
             P.append(f"SKILL.md references missing file {ref}")
@@ -503,9 +506,11 @@ def validate_skill(proposal: dict, files: dict[str, str], pattern: dict, *, allo
         probs = check_provenance(t, members, cache)
         rep["provenance"].append({"name": t["name"], "provenance": t.get("provenance"), "problems": probs})
         P += [f"[{t['name']}] {p}" for p in probs]
-    has_scripts = any(p.endswith(".py") for p in files)
-    if has_scripts and not tests:
+    has_scripts = any(p.endswith(".py") for p in files if not p.startswith("evals/"))
+    if has_scripts and not tests and proposal.get("created_by") != "skill-creator":
         P.append("the skill bundles scripts but has no tests for them")
+    if proposal.get("created_by") == "skill-creator":
+        rep["note"] = "built with skill-creator: its own evals/ test the skill; the harness adds the checks below"
     if tests:
         ok, why = sandbox.may_run(allow_no_netns)
         if not ok:

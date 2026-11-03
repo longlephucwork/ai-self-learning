@@ -123,7 +123,7 @@ def hook_main() -> int:
 def session_start() -> int:
     """Tell Claude about validated drafts waiting for the user (local file reads only; no model call)."""
     parts = []
-    for name in ("refine.auto", "harness_lib.update"):
+    for name in ("registry.install", "refine.auto", "harness_lib.update"):
         try:
             mod = __import__(name, fromlist=["session_start_context"])
             t = mod.session_start_context()

@@ -281,6 +281,9 @@ def propose(key: str, *, model: str | None = None, max_attempts: int = 2, force:
     elif pattern["status"] != "candidate" and not force:
         raise ValueError(f"pattern {key!r} has status {pattern['status']!r}; only candidates are proposed "
                          f"(use --force to override)")
+    if pattern.get("suggested_type") == "skill" and not force_type:
+        raise ValueError(f"{key!r} is a skill, and skills are built with skill-creator, not drafted by the harness: "
+                         f"write a brief with `refine.py brief {key}`")
     if pattern["status"] in ("rejected", "retired") and force:
         log(f"warning: pattern was {pattern['status']}; proposing anyway because of --force")
     if force_type:
@@ -313,6 +316,8 @@ def propose(key: str, *, model: str | None = None, max_attempts: int = 2, force:
             if revision is not None:
                 apply_revision_rules(prop, revision)
             errs = check_structure(prop, pattern)
+            if prop["type"] == "skill":
+                errs.append("skills are built with skill-creator, not drafted by the harness; return a script or tool")
             if force_type and prop["type"] != force_type:
                 errs.append(f"the draft must be a {force_type}, not a {prop['type']}")
             if promotes is not None:
