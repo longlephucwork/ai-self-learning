@@ -1,0 +1,128 @@
+{
+  "validated_at": "2026-11-03T04:50:41+00:00",
+  "network_isolated": true,
+  "tests": [
+    {
+      "name": "semicolon_autodetect",
+      "passed": true,
+      "problems": [],
+      "exit": 0,
+      "stdout": "Wrote 2 rows to sales.json\n",
+      "stderr": "",
+      "unexpected_new_files": []
+    },
+    {
+      "name": "explicit_tab_delimiter",
+      "passed": true,
+      "problems": [],
+      "exit": 0,
+      "stdout": "Wrote 1 rows to t.json\n",
+      "stderr": "",
+      "unexpected_new_files": []
+    },
+    {
+      "name": "missing_input",
+      "passed": true,
+      "problems": [],
+      "exit": 1,
+      "stdout": "",
+      "stderr": "error: cannot read nope.csv: [Errno 2] No such file or directory: 'nope.csv'\n",
+      "unexpected_new_files": []
+    },
+    {
+      "name": "regression: cities",
+      "passed": true,
+      "problems": [],
+      "exit": 0,
+      "stdout": "Wrote 3 rows to cities.json\n",
+      "stderr": "",
+      "unexpected_new_files": []
+    },
+    {
+      "name": "regression: kv numeric v",
+      "passed": true,
+      "problems": [],
+      "exit": 0,
+      "stdout": "Wrote 1 rows to kv.json\n",
+      "stderr": "",
+      "unexpected_new_files": []
+    },
+    {
+      "name": "regression: fruit",
+      "passed": true,
+      "problems": [],
+      "exit": 0,
+      "stdout": "Wrote 2 rows to fruit.json\n",
+      "stderr": "",
+      "unexpected_new_files": []
+    },
+    {
+      "name": "regression: prices",
+      "passed": true,
+      "problems": [],
+      "exit": 0,
+      "stdout": "Wrote 3 rows to prices.json\n",
+      "stderr": "",
+      "unexpected_new_files": []
+    },
+    {
+      "name": "regression: missing input",
+      "passed": true,
+      "problems": [],
+      "exit": 1,
+      "stdout": "",
+      "stderr": "error: cannot read nope.csv: [Errno 2] No such file or directory: 'nope.csv'\n",
+      "unexpected_new_files": []
+    }
+  ],
+  "provenance": [
+    {
+      "name": "semicolon_autodetect",
+      "provenance": "wraps",
+      "problems": []
+    },
+    {
+      "name": "explicit_tab_delimiter",
+      "provenance": "wraps",
+      "problems": []
+    },
+    {
+      "name": "missing_input",
+      "provenance": "wraps",
+      "problems": []
+    },
+    {
+      "name": "regression: cities",
+      "provenance": "wraps",
+      "problems": []
+    },
+    {
+      "name": "regression: kv numeric v",
+      "provenance": "wraps",
+      "problems": []
+    },
+    {
+      "name": "regression: fruit",
+      "provenance": "wraps",
+      "problems": []
+    },
+    {
+      "name": "regression: prices",
+      "provenance": "wraps",
+      "problems": []
+    },
+    {
+      "name": "regression: missing input",
+      "provenance": "wraps",
+      "problems": []
+    }
+  ],
+  "coverage": {
+    "successful_sessions": 8,
+    "covered": 8,
+    "required": 8
+  },
+  "passed": true,
+  "problems": [],
+  "fingerprint": "214e38ac30f0adf3"
+}

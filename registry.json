@@ -33,6 +33,39 @@
       "approval_note": "approved by the user in chat",
       "draft": "generated/csv-to-json-v2",
       "shim": "bin/csv-to-json"
+    },
+    "csv_to_json": {
+      "name": "csv_to_json",
+      "type": "tool",
+      "pattern_key": "csv-to-json-conversion",
+      "version": 1,
+      "path": "mcp_tools/tools/csv_to_json",
+      "entrypoint": "",
+      "symlink": null,
+      "description": "Convert a CSV file with a header row into a JSON file containing an array of objects (one per data row, keyed by header). Integer and decimal values (e.g. 42, -3, 4.50) are written as JSON numbers; everything else stays a string. Blank rows are skipped, short rows are padded with empty strings, and rows with more cells than headers cause an error. The delimiter is auto-detected from the header row (comma, semicolon, tab, pipe) unless specified. Input is read as UTF-8; the output file is written (overwritten) as indented UTF-8 JSON. Prints 'Wrote N rows to <output>' on success; exits non-zero with an error message if the input is missing/unreadable, the header is missing or has empty names, or the delimiter is invalid. Relative paths resolve against the tool's working (project) directory.",
+      "files": {
+        "tool.json": "d9e5bf56286a1533"
+      },
+      "evidence": {
+        "n_sessions": 8,
+        "n_success": 6,
+        "sessions": [
+          "0f9ceaa7-0288-4500-8723-33b6cfee1d23",
+          "28150c3c-9d9d-4ed1-86f7-8df303520181",
+          "5ea3fc45-2115-401c-9a12-54a08c0dc5ad",
+          "6c5a9cc7-d42e-465c-9675-8f6d6d671507",
+          "9c74a34f-ac40-41dc-9c7d-c322067b3e20",
+          "be7112a6-9984-45ef-97ef-14a7a32becf1",
+          "e74a660c-67a5-40c4-aa03-c2b7b5c8f063",
+          "eb17f8bd-43a2-4c6c-88f6-ff02e57a046a"
+        ]
+      },
+      "tests_passed": 8,
+      "tests_total": 8,
+      "approved_at": "2026-11-03T04:50:42+00:00",
+      "approval_note": "approved by the user in chat",
+      "draft": "generated/csv_to_json",
+      "wraps": "csv-to-json"
     }
   },
   "history": [
@@ -48,6 +81,13 @@
       "name": "csv-to-json",
       "version": 2,
       "at": "2026-11-03T04:34:02+00:00",
+      "note": "approved by the user in chat"
+    },
+    {
+      "event": "install",
+      "name": "csv_to_json",
+      "version": 1,
+      "at": "2026-11-03T04:50:42+00:00",
       "note": "approved by the user in chat"
     }
   ]
