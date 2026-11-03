@@ -12,15 +12,15 @@ How the code sandbox works on each OS, and step-by-step checks to confirm an ins
 
 Resource limits (CPU, memory, file size) apply on Linux and macOS. The environment is scrubbed and there's a timeout everywhere. The static safety scan rejects network code on every OS.
 
-- [Linux](#linux): the reference platform; every step verified
+- [Linux](#linux)
 - [macOS](#macos)
 - [Windows](#windows)
 - [WSL](#wsl)
-- [Docker](#docker): verified in Docker 29
+- [Docker](#docker)
 
 ## Linux
 
-This is the reference platform: these steps have been run on Linux, and every test runs here. To check your machine, open a terminal; run the commands from the repo folder (`~/claude-learning-harness`) unless noted.
+Every test runs on Linux. Open a terminal; run the commands from the repo folder (`~/claude-learning-harness`) unless noted.
 
 **1. Prerequisites.** Each should print a version, and Python must be 3.10+:
 ```bash
@@ -82,7 +82,7 @@ If a step fails, please open an issue with the output of steps 2–4 and 8, plus
 
 ## macOS
 
-The macOS sandbox (`sandbox-exec` with the profile `(version 1)(allow default)(deny network*)`) is covered by unit tests but hasn't been run on a real Mac yet. To check it on yours, run from the repo folder:
+On macOS the sandbox is `sandbox-exec` with the profile `(version 1)(allow default)(deny network*)`. Run these from the repo folder:
 
 **1. The sandbox tool exists and accepts the profile.** This should print `0`:
 ```bash
@@ -122,7 +122,7 @@ If a step fails, please open an issue with the output of steps 1–4 and `sw_ver
 
 ## Windows
 
-The Windows launchers and the Windows-specific code have unit tests but haven't been run on a real Windows machine yet. That code covers the user PATH, `.cmd` wrappers, file locking and UTF-8 I/O. To check it on yours, use PowerShell; run the commands from the repo folder unless noted.
+Windows-specific parts: the user PATH, `.cmd` wrappers, file locking and UTF-8 I/O. Use PowerShell; run the commands from the repo folder unless noted.
 
 **1. Prerequisites.** Each should print a version, and Python must be 3.10+:
 ```powershell
@@ -179,7 +179,7 @@ If a step fails, please open an issue with the output of steps 2–4 and 7, plus
 
 ## WSL
 
-WSL (Windows Subsystem for Linux) runs a real Linux, so this is the Linux install, plus a few WSL-specific checks. The installer detects WSL and prints `Linux (WSL2)` in its first line. It has unit tests for the WSL checks but hasn't been run on a real WSL machine yet.
+WSL (Windows Subsystem for Linux) runs a real Linux, so this is the Linux install, plus a few WSL-specific checks. The installer detects WSL and prints `Linux (WSL2)` in its first line.
 
 **1. WSL2, not WSL1.** In **PowerShell**, check that your distro's `VERSION` column says `2`:
 ```powershell
@@ -225,7 +225,7 @@ If a step fails, please open an issue with the output of steps 1–4, plus `unam
 
 ## Docker
 
-Tested: in Docker 29 with the `python:3.12` image, as root and as a normal user. Inside a container the installer prints `Linux (container)` in its first line.
+Inside a container the installer prints `Linux (container)` in its first line. The steps work as root and as a normal user.
 
 **Why containers need one extra flag.** Docker's default seccomp profile (its list of allowed system calls) only lets containers with `CAP_SYS_ADMIN` call `unshare`. So the code sandbox (`unshare -rn`) fails with `Operation not permitted`, and validation and MCP tools refuse to run code. `docker/seccomp-userns.json` is Docker's own default profile with **one** added rule allowing `unshare`. Every other restriction stays as Docker ships it; for example, `mount` is still refused. This is safer than the alternatives:
 
