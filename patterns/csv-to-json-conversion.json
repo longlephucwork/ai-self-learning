@@ -2,7 +2,7 @@
   "key": "csv-to-json-conversion",
   "label": "CSV to JSON conversion",
   "description": "Convert a CSV file with a header row into a JSON array of objects keyed by header names, saved to a new file. Numeric values are sometimes stored as numbers. Some sessions use an installed converter CLI, and one hit an error on a row with extra cells.",
-  "status": "installed",
+  "status": "retired",
   "n_sessions": 9,
   "n_success": 7,
   "success_outcomes": [
@@ -38,5 +38,9 @@
     "name": "csv_to_json",
     "version": 1,
     "at": "2026-11-03T04:50:42+00:00"
+  },
+  "retired": {
+    "at": "2026-11-03T10:48:50+00:00",
+    "reason": "demo item; the public repo ships no learned items"
   }
 }
