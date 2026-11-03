@@ -83,6 +83,63 @@ python3 -m unittest discover -s tests -t .
 
 If a step fails, please open an issue with the output of steps 1–4 and `sw_vers`. The most likely differences on some macOS versions are DNS (`test_dns_is_blocked`) and an extra environment variable (`test_environment_is_scrubbed`).
 
+#### Testing the Windows install
+
+The Windows launchers and the Windows-specific code have unit tests but haven't been run on a real Windows machine yet. That code covers the user PATH, `.cmd` wrappers, file locking and UTF-8 I/O. To check it on yours, use PowerShell; run the commands from the repo folder unless noted.
+
+**1. Prerequisites.** Each should print a version, and Python must be 3.10+:
+```powershell
+py -3 --version; git --version; claude --version
+```
+If `python` opens the Microsoft Store instead of running, turn off its alias in *Settings > Apps > Advanced app settings > App execution aliases*.
+
+**2. Run the installer.** Run `.\install.bat`, or the `irm ... | iex` one-liner above. Expected:
+- `[ok]` for Python, git and the Claude Code CLI
+- `[warn] no code sandbox on this system: native Windows has no equivalent; WSL gives you the Linux sandbox`
+- the question `Allow running code without network isolation? [y/N]`: answer **N** for this test, and expect `[warn] left disabled ...`
+- `[ok] self-test: OK`, then `[ok]` for the hooks, the MCP server and the PATH
+
+**3. Status.** Open a **new** terminal first, so the PATH change applies. Expect `hooks installed`, `MCP server `learned` registered` and `bin/ on PATH`:
+```powershell
+python install.py --check
+```
+
+**4. MCP server.** Expect `Scope: User config`, `Status: √ Connected` and the full path of `python.exe` as the command:
+```powershell
+claude mcp get learned
+```
+
+**5. PATH and the script wrapper.** Expect `...\claude-learning-harness\bin\csv-to-json.cmd`, the `usage: csv_to_json.py ...` line, and the path of `python.exe`:
+```powershell
+where.exe csv-to-json
+csv-to-json --help
+$env:LEARNING_HARNESS_PYTHON
+```
+
+**6. Session logging.** Start `claude` in any folder, send one message, then exit (`/exit`). Back in the repo folder, the session should appear at the top of the list:
+```powershell
+python review\cli.py list -n 3
+```
+If it doesn't, check the hook command (it should be the quoted full `python.exe` path followed by the quoted `hooks/log_session.py` path) and `store\hook_errors.log`:
+```powershell
+Get-Content $env:USERPROFILE\.claude\settings.json
+```
+
+**7. Tests.** All of these should pass. The network-isolation checks in `tests.test_sandbox` report as skipped, which is expected without a sandbox:
+```powershell
+python -m unittest tests.test_phase1 tests.test_phase2 tests.test_sandbox tests.test_install -v
+```
+The full suite (`python -m unittest discover -s tests -t .`) should also pass, with the Phase 3–5 and MCP tests skipped: they run generated code, which needs the Linux/macOS sandbox.
+
+**8. Uninstall.** Expect `[ok]` lines for removing the hooks, the MCP server and the PATH entry; `LEARNING_HARNESS_PYTHON` is removed too:
+```powershell
+python install.py --uninstall
+```
+
+If a step fails, please open an issue with the output of steps 2–4 and 7, plus `[Environment]::OSVersion` and `py -3 --version`. The most likely trouble spots are the PATH update (step 5), how Claude Code on Windows runs hook commands (step 6), and user folders with spaces or non-ASCII characters in the name.
+
+**Full sandbox on Windows: use WSL.** Install Ubuntu with `wsl --install`, install Claude Code inside it, and run the Linux one-liner there. You get the `unshare` sandbox and every test runs.
+
 Resource limits (CPU, memory, file size) apply on Linux and macOS. The environment is scrubbed and there's a timeout everywhere. The static safety scan rejects network code on every OS.
 
 **Your data stays local.** `store/` (sessions, ratings, usage) is git-ignored, so a fresh install starts with an empty store. Learned artifacts (`scripts/`, `mcp_tools/tools/`, `registry.json`, `patterns/`, `generated/`) are in git and come with the clone.

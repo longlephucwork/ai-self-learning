@@ -88,6 +88,8 @@ def _log_error(msg: str) -> None:
 
 
 def hook_main() -> int:
+    if hasattr(sys.stdin, "reconfigure"):
+        sys.stdin.reconfigure(encoding="utf-8", errors="replace")
     raw = sys.stdin.read()
     try:
         payload = json.loads(raw) if raw.strip() else {}

@@ -112,4 +112,5 @@ def run(cmd: list[str], *, cwd: str, env: dict, stdin: str = "", timeout: int,
     if os.name == "posix":
         kw["preexec_fn"] = _limiter(cpu_s, mem_mb, fsize_mb)
     return subprocess.run(wrap(cmd), cwd=cwd, env=env, input=stdin, capture_output=True, text=True,
+                          encoding="utf-8", errors="replace",
                           timeout=timeout, **kw)

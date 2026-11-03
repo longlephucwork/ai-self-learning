@@ -182,6 +182,9 @@ class Server:
 
 
 def main() -> int:
+    # MCP stdio is UTF-8 with \n line endings; Windows would otherwise use the ANSI code page and \r\n.
+    sys.stdin.reconfigure(encoding="utf-8", errors="replace")
+    sys.stdout.reconfigure(encoding="utf-8", newline="\n")
     srv = Server()
     log(f"started; {len(srv._tools)} tool(s); project={srv.project}")
     threading.Thread(target=srv.watch, daemon=True).start()

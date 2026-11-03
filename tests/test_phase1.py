@@ -108,6 +108,47 @@ class Phase1(unittest.TestCase):
         self.assertEqual(rec["ingest_count"], 21)
         self.assertEqual(len(store.read_jsonl(store.session_dir("test-sess-1") / "ratings.jsonl")), 10)
 
+    def test_windows_lock_and_replace_fallbacks(self):
+        """The msvcrt lock (Windows) must serialize like flock; os.replace is retried on PermissionError."""
+        import threading
+        from unittest import mock
+        from harness_lib import store
+        from hooks import log_session
+        locks, guard = {}, threading.Lock()
+
+        class FakeMsvcrt:  # stands in for Windows' msvcrt.locking, keyed by the locked file
+            LK_LOCK, LK_UNLCK = 1, 0
+
+            @staticmethod
+            def locking(fd, mode, n):
+                key = os.path.realpath(f"/proc/self/fd/{fd}")
+                with guard:
+                    lk = locks.setdefault(key, threading.Lock())
+                lk.acquire() if mode == FakeMsvcrt.LK_LOCK else lk.release()
+
+        if not os.path.exists("/proc/self/fd"):
+            self.skipTest("needs /proc to emulate msvcrt here")
+        with mock.patch.object(store, "fcntl", None), mock.patch.object(store, "msvcrt", FakeMsvcrt):
+            self._hook({"session_id": "test-sess-1", "transcript_path": str(FIX), "hook_event_name": "Stop"})
+            ts = [threading.Thread(target=lambda: [log_session.ingest(str(FIX), hook_event="Stop",
+                                                                      session_id="test-sess-1") for _ in range(10)])
+                  for _ in range(3)]
+            [t.start() for t in ts]; [t.join() for t in ts]
+        self.assertEqual(store.load_session("test-sess-1")["ingest_count"], 31)
+
+        real, calls = os.replace, []
+
+        def flaky(src, dst):
+            calls.append(1)
+            if len(calls) < 3:
+                raise PermissionError("in use")
+            real(src, dst)
+        target = Path(self.tmp.name) / "x.json"   # build paths before faking os.name (pathlib checks it)
+        with mock.patch.object(store.os, "replace", flaky), mock.patch.object(store.os, "name", "nt"):
+            store.write_json_atomic(target, {"a": 1})
+        self.assertEqual(len(calls), 3)
+        self.assertEqual(store.read_json(Path(self.tmp.name) / "x.json"), {"a": 1})
+
     def test_stop_hook_active_skipped(self):
         from harness_lib import store
         self._hook({"transcript_path": str(FIX), "hook_event_name": "Stop", "stop_hook_active": True})

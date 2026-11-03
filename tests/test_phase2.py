@@ -31,7 +31,7 @@ class Phase2(unittest.TestCase):
         t = Path(self.tmp.name)
         os.environ["LEARNING_HARNESS_STORE"] = str(t / "store")
         os.environ["LEARNING_HARNESS_PATTERNS"] = str(t / "patterns")
-        os.environ["LEARNING_HARNESS_CLAUDE_CMD"] = f"{sys.executable} {ROOT / 'tests' / 'fake_claude.py'}"
+        os.environ["LEARNING_HARNESS_CLAUDE_CMD"] = json.dumps([sys.executable, str(ROOT / 'tests' / 'fake_claude.py')])
         os.environ["FAKE_CLAUDE_LOG"] = str(t / "calls.jsonl")
         os.environ.pop("FAKE_DROP_ID", None)
         from hooks.log_session import ingest

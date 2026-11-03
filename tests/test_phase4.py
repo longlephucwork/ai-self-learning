@@ -21,6 +21,9 @@ def git(repo, *a):
 
 class Phase4(unittest.TestCase):
     def setUp(self):
+        from harness_lib import sandbox
+        if not sandbox.network_isolated():
+            self.skipTest("runs generated code: needs the Linux/macOS sandbox (on Windows use WSL)")
         self._env = dict(os.environ)
         self.tmp = tempfile.TemporaryDirectory()
         t = self.t = Path(self.tmp.name)
@@ -34,7 +37,7 @@ class Phase4(unittest.TestCase):
             LEARNING_HARNESS_STORE=str(repo / "store"), LEARNING_HARNESS_PATTERNS=str(repo / "patterns"),
             LEARNING_HARNESS_GENERATED=str(repo / "generated"), LEARNING_HARNESS_INSTALL_ROOT=str(repo),
             LEARNING_HARNESS_SKILLS_DIR=str(t / "home" / ".claude" / "skills"),
-            LEARNING_HARNESS_CLAUDE_CMD=f"{sys.executable} {ROOT / 'tests' / 'fake_claude.py'}")
+            LEARNING_HARNESS_CLAUDE_CMD=json.dumps([sys.executable, str(ROOT / 'tests' / 'fake_claude.py')]))
         git(repo, "commit", "-qm", "init")
         from hooks.log_session import ingest
         from harness_lib import store

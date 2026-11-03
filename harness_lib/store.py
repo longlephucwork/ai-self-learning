@@ -19,6 +19,7 @@ import hashlib
 import json
 import os
 import tempfile
+import time
 from contextlib import contextmanager
 from dataclasses import asdict
 from datetime import datetime, timezone
@@ -26,8 +27,12 @@ from pathlib import Path
 
 try:
     import fcntl
-except ImportError:  # Windows: rely on atomic rename only
+except ImportError:  # Windows
     fcntl = None
+try:
+    import msvcrt
+except ImportError:  # POSIX
+    msvcrt = None
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 FORMAT_VERSION = 1
@@ -68,7 +73,7 @@ def write_json_atomic(path: Path, obj) -> None:
         with os.fdopen(fd, "w", encoding="utf-8") as fh:
             json.dump(obj, fh, indent=2, ensure_ascii=False)
             fh.write("\n")
-        os.replace(tmp, path)
+        _replace(tmp, path)
     except BaseException:
         try:
             os.unlink(tmp)
@@ -77,10 +82,22 @@ def write_json_atomic(path: Path, obj) -> None:
         raise
 
 
+def _replace(src: str, dst: Path) -> None:
+    """os.replace, retried briefly: on Windows it fails while another process has dst open."""
+    for i in range(50):
+        try:
+            os.replace(src, dst)
+            return
+        except PermissionError:
+            if os.name != "nt" or i == 49:
+                raise
+            time.sleep(0.02)
+
+
 def append_jsonl(path: Path, obj) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     line = (json.dumps(obj, ensure_ascii=False) + "\n").encode("utf-8")
-    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o644)
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND | getattr(os, "O_BINARY", 0), 0o644)
     try:
         os.write(fd, line)  # single O_APPEND write: lines never interleave
     finally:
@@ -108,15 +125,26 @@ def read_json(path: Path):
 
 @contextmanager
 def _locked(d: Path):
-    if fcntl is None:
-        yield
-        return
-    with open(d / ".lock", "w") as fh:
-        fcntl.flock(fh, fcntl.LOCK_EX)
+    """Exclusive per-session lock: flock on POSIX, msvcrt.locking on Windows."""
+    with open(d / ".lock", "a+") as fh:
+        if fcntl is not None:
+            fcntl.flock(fh, fcntl.LOCK_EX)
+        elif msvcrt is not None:
+            while True:
+                try:
+                    fh.seek(0)
+                    msvcrt.locking(fh.fileno(), msvcrt.LK_LOCK, 1)  # retries ~10s, then raises
+                    break
+                except OSError:
+                    continue
         try:
             yield
         finally:
-            fcntl.flock(fh, fcntl.LOCK_UN)
+            if fcntl is not None:
+                fcntl.flock(fh, fcntl.LOCK_UN)
+            elif msvcrt is not None:
+                fh.seek(0)
+                msvcrt.locking(fh.fileno(), msvcrt.LK_UNLCK, 1)
 
 
 # ---------- sessions ----------

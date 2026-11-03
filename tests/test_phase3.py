@@ -79,12 +79,15 @@ def proposal(script=GOOD_SCRIPT, tests=None, extra_files=()):
 
 class Phase3(unittest.TestCase):
     def setUp(self):
+        from harness_lib import sandbox
+        if not sandbox.network_isolated():
+            self.skipTest("runs generated code: needs the Linux/macOS sandbox (on Windows use WSL)")
         self._env = dict(os.environ)
         self.tmp = tempfile.TemporaryDirectory()
         t = self.t = Path(self.tmp.name)
         os.environ.update(LEARNING_HARNESS_STORE=str(t / "store"), LEARNING_HARNESS_PATTERNS=str(t / "patterns"),
                           LEARNING_HARNESS_GENERATED=str(t / "generated"),
-                          LEARNING_HARNESS_CLAUDE_CMD=f"{sys.executable} {ROOT / 'tests' / 'fake_claude.py'}")
+                          LEARNING_HARNESS_CLAUDE_CMD=json.dumps([sys.executable, str(ROOT / 'tests' / 'fake_claude.py')]))
         os.environ.pop("FAKE_PROPOSAL_FILE_2", None)
         from hooks.log_session import ingest
         from harness_lib import store

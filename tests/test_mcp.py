@@ -75,6 +75,8 @@ class MCPServer:
 
 class MCP(p4.Phase4):
     def setUp(self):
+        if os.name == "nt":
+            self.skipTest("the protocol tests read pipes with select(), which Windows only supports for sockets")
         super().setUp()
         self.draft(proposal())
         rc, out = self.cli("approve", "csv-to-json", "--yes")

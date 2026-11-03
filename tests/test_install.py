@@ -32,6 +32,10 @@ class Installer(unittest.TestCase):
         (t / "home").mkdir()
         fake = t / "claude"
         fake.write_text(FAKE_CLAUDE); fake.chmod(0o755)
+        if os.name == "nt":  # Windows can't execute a .py by its shebang: wrap it in a .cmd
+            (t / "claude.py").write_text(FAKE_CLAUDE)
+            fake = t / "claude.cmd"
+            fake.write_text(f'@"{sys.executable}" "{t / "claude.py"}" %*\r\n')
         os.environ.update(HOME=str(t / "home"), SHELL="/bin/zsh", LEARNING_HARNESS_CLAUDE_BIN=str(fake),
                           FAKE_CLAUDE_CALLS=str(t / "calls.json"), LEARNING_HARNESS_STORE=str(t / "store"))
 
@@ -44,7 +48,9 @@ class Installer(unittest.TestCase):
 
     def run_main(self, *argv):
         out = io.StringIO()
-        with redirect_stdout(out):
+        # Exercise the shell-rc PATH code on every OS and never touch the real Windows registry.
+        with redirect_stdout(out), mock.patch.object(install, "IS_WIN", False), \
+                mock.patch.object(install, "_win_env", side_effect=AssertionError("registry touched")):
             rc = install.main(list(argv))
         return rc, out.getvalue()
 

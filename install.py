@@ -77,7 +77,7 @@ def claude_bin() -> str | None:
 
 
 def run(cmd, **kw) -> subprocess.CompletedProcess:
-    return subprocess.run(cmd, capture_output=True, text=True, **kw)
+    return subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", **kw)
 
 
 def os_name() -> str:

@@ -7,7 +7,8 @@ Hardening for untrusted input:
   * output must validate against a JSON schema; we re-check it locally anyway
   * prompt goes over stdin (argv has a 128KB per-argument limit)
 
-LEARNING_HARNESS_CLAUDE_CMD overrides the executable (tests use a fake).
+LEARNING_HARNESS_CLAUDE_CMD overrides the executable (tests use a fake): a JSON list of argv
+strings (safe with spaces in paths), or a shell-style string.
 """
 from __future__ import annotations
 
@@ -28,8 +29,13 @@ class ClaudeError(RuntimeError):
 def run_structured(prompt: str, schema: dict, *, system: str, model: str | None = None,
                    max_budget_usd: float = 0.50, timeout: int = 300) -> tuple[dict, float]:
     """Return (structured_output, cost_usd)."""
-    override = os.environ.get("LEARNING_HARNESS_CLAUDE_CMD")
-    exe = shlex.split(override, posix=os.name != "nt") if override else [shutil.which("claude") or "claude"]
+    override = os.environ.get("LEARNING_HARNESS_CLAUDE_CMD")  # a JSON list, or a shell-style string
+    if override and override.lstrip().startswith("["):
+        exe = json.loads(override)
+    elif override:
+        exe = shlex.split(override, posix=os.name != "nt")
+    else:
+        exe = [shutil.which("claude") or "claude"]
     cmd = exe + [
         "-p", "--output-format", "json",
         "--tools", "",
@@ -42,7 +48,7 @@ def run_structured(prompt: str, schema: dict, *, system: str, model: str | None 
     env = {**os.environ, "LEARNING_HARNESS_DISABLE": "1"}
     with tempfile.TemporaryDirectory(prefix="lh-claude-") as cwd:
         try:
-            p = subprocess.run(cmd, input=prompt, capture_output=True, text=True, env=env,
+            p = subprocess.run(cmd, input=prompt, capture_output=True, text=True, encoding="utf-8", errors="replace", env=env,
                                cwd=cwd, timeout=timeout)
         except subprocess.TimeoutExpired as e:
             raise ClaudeError(f"claude timed out after {timeout}s") from e
