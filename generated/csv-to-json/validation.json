@@ -1,5 +1,5 @@
 {
-  "validated_at": "2026-11-03T04:06:01+00:00",
+  "validated_at": "2026-11-03T04:10:17+00:00",
   "network_isolated": true,
   "tests": [
     {
@@ -81,5 +81,6 @@
     "required": 3
   },
   "passed": true,
-  "problems": []
+  "problems": [],
+  "fingerprint": "5113affb2830c26e"
 }

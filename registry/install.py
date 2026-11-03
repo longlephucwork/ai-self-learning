@@ -1,3 +1,249 @@
 #!/usr/bin/env python3
-"""Phase 4 — not implemented yet. See README.md."""
-raise SystemExit("registry/install.py: Phase 4 not implemented yet")
+"""Phase 4: install approved artifacts and keep the registry. Every change is a git commit.
+
+Called by `review/cli.py approve|reject` (which owns the human-approval gate);
+it can also be run directly for listing and uninstalling:
+
+  install.py list
+  install.py uninstall <name> [--reason TEXT]
+
+Install locations (relative to the install root = this repo unless
+$LEARNING_HARNESS_INSTALL_ROOT is set):
+  script -> scripts/<name>/                      run with: python3 scripts/<name>/<entrypoint>
+  skill  -> skills/<name>/ + symlink ~/.claude/skills/<name> -> it   (git stays the source of truth)
+  tool   -> not yet: needs the MCP tool server (mcp_tools/server.py), which isn't built yet
+registry.json records what is installed, which version, from which pattern and evidence.
+"""
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import os
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from harness_lib import store  # noqa: E402
+
+
+class InstallError(RuntimeError):
+    pass
+
+
+def install_root() -> Path:
+    return Path(os.environ.get("LEARNING_HARNESS_INSTALL_ROOT", store.REPO_ROOT)).resolve()
+
+
+def skills_link_dir() -> Path:
+    return Path(os.environ.get("LEARNING_HARNESS_SKILLS_DIR", Path.home() / ".claude" / "skills"))
+
+
+def registry_path() -> Path:
+    return install_root() / "registry.json"
+
+
+def load_registry() -> dict:
+    return store.read_json(registry_path()) or {"format_version": 1, "installed": {}, "history": []}
+
+
+def _save_registry(reg: dict) -> None:
+    store.write_json_atomic(registry_path(), reg)
+
+
+def file_hashes(files: dict[str, str]) -> dict[str, str]:
+    return {p: hashlib.sha256(c.encode("utf-8")).hexdigest()[:16] for p, c in sorted(files.items())}
+
+
+# ---------------- git ----------------
+
+def _git(*args, check=True) -> subprocess.CompletedProcess:
+    return subprocess.run(["git", "-C", str(install_root()), *args], capture_output=True, text=True, check=check)
+
+
+def git_available() -> bool:
+    try:
+        return _git("rev-parse", "--is-inside-work-tree", check=False).stdout.strip() == "true"
+    except FileNotFoundError:
+        return False
+
+
+def git_commit(paths: list[Path], message: str) -> str | None:
+    """Commit only `paths` (adds, modifications and deletions); leaves anything else alone."""
+    root = install_root()
+    rels = []
+    for p in paths:
+        p = Path(p).resolve()
+        try:
+            rels.append(p.relative_to(root).as_posix())
+        except ValueError:
+            continue  # outside the repo (e.g. the ~/.claude/skills symlink); not versioned
+    if not rels:
+        return None
+    _git("add", "-A", "--", *rels)
+    if not _git("diff", "--cached", "--quiet", "--", *rels, check=False).returncode:
+        return None  # nothing changed
+    _git("commit", "-q", "-m", message, "--", *rels)
+    return _git("rev-parse", "--short", "HEAD").stdout.strip()
+
+
+# ---------------- install / uninstall ----------------
+
+def target_dir(kind: str, name: str) -> Path:
+    if kind == "script":
+        return install_root() / "scripts" / name
+    if kind == "skill":
+        return install_root() / "skills" / name
+    raise InstallError(f"installing a {kind!r} is not supported yet "
+                       f"(tools need the MCP tool server, mcp_tools/server.py, which isn't built yet)")
+
+
+def install(proposal: dict, files: dict[str, str], *, draft_dir: Path, note: str | None,
+            validation: dict, use_git: bool = True) -> dict:
+    """Install exactly `files` (the bytes that were just validated). Caller has the human approval."""
+    if use_git and not git_available():
+        raise InstallError(f"{install_root()} is not a git repository; refusing to install without "
+                           f"versioning (pass --no-git to override)")
+    name, kind = proposal["name"], proposal["type"]
+    dest = target_dir(kind, name)
+    reg = load_registry()
+    prev = reg["installed"].get(name)
+    if prev and prev["pattern_key"] != proposal["pattern_key"]:
+        raise InstallError(f"{name!r} is already installed from another pattern ({prev['pattern_key']})")
+    link = None
+    if kind == "skill":
+        link = skills_link_dir() / name
+        if link.exists() and not (link.is_symlink() and link.resolve() == dest.resolve()):
+            raise InstallError(f"{link} already exists and is not ours; not overwriting it")
+
+    # Write the new version into place (replace the folder wholesale; git keeps the old one).
+    tmp = dest.with_name(f".{name}.installing")
+    shutil.rmtree(tmp, ignore_errors=True)
+    for p, c in files.items():
+        fp = tmp / p
+        fp.parent.mkdir(parents=True, exist_ok=True)
+        fp.write_text(c, encoding="utf-8")
+    if kind == "script":
+        os.chmod(tmp / proposal["entrypoint"], 0o755)
+    if dest.exists():
+        shutil.rmtree(dest)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    os.replace(tmp, dest)
+    if link is not None:
+        link.parent.mkdir(parents=True, exist_ok=True)
+        if not link.is_symlink():
+            link.symlink_to(dest.resolve(), target_is_directory=True)
+
+    pattern = store.load_pattern(proposal["pattern_key"]) or {}
+    entry = {
+        "name": name, "type": kind, "pattern_key": proposal["pattern_key"],
+        "version": (prev or {}).get("version", 0) + 1,
+        "path": dest.relative_to(install_root()).as_posix(),
+        "entrypoint": proposal.get("entrypoint"),
+        "symlink": str(link) if link else None,
+        "description": proposal["description"],
+        "files": file_hashes(files),
+        "evidence": {"n_sessions": pattern.get("n_sessions"), "n_success": pattern.get("n_success"),
+                     "sessions": proposal["evidence"]["sessions"]},
+        "tests_passed": sum(t["passed"] for t in validation.get("tests", [])),
+        "tests_total": len(validation.get("tests", [])),
+        "approved_at": store.now(), "approval_note": note,
+        "draft": str(draft_dir),
+        "usage": {"runs": 0, "failures": 0},
+    }
+    reg["installed"][name] = entry
+    reg["history"].append({"event": "install", "name": name, "version": entry["version"], "at": entry["approved_at"],
+                           "note": note})
+    _save_registry(reg)
+
+    if pattern:
+        pattern["status"] = "installed"
+        pattern["installed"] = {"name": name, "version": entry["version"], "at": entry["approved_at"]}
+        store.save_pattern(pattern)
+    meta = store.read_json(draft_dir / "proposal.json")
+    meta["status"] = "installed"
+    meta["decision"] = {"decision": "approved", "at": entry["approved_at"], "note": note}
+    store.write_json_atomic(draft_dir / "proposal.json", meta)
+
+    if use_git:
+        verb = "update" if prev else "install"
+        msg = (f"learned: {verb} {kind} {name} v{entry['version']}\n\n"
+               f"Pattern: {proposal['pattern_key']} (seen {pattern.get('n_sessions')} times, "
+               f"{pattern.get('n_success')} successful)\n"
+               f"Tests: {entry['tests_passed']}/{entry['tests_total']} passed in sandbox\n"
+               f"Approved by a human via review/cli.py" + (f": {note}" if note else ""))
+        entry["commit"] = git_commit([dest, registry_path(), store.patterns_dir() / f"{proposal['pattern_key']}.json",
+                                      draft_dir], msg)
+    return entry
+
+
+def reject(proposal: dict, *, draft_dir: Path, reason: str, use_git: bool = True) -> str | None:
+    ts = store.now()
+    pattern = store.load_pattern(proposal["pattern_key"])
+    if pattern:
+        pattern["status"] = "rejected"
+        pattern["rejected"] = {"at": ts, "reason": reason, "draft": proposal["name"]}
+        store.save_pattern(pattern)
+    meta = store.read_json(draft_dir / "proposal.json")
+    meta["status"] = "rejected"
+    meta["decision"] = {"decision": "rejected", "at": ts, "note": reason}
+    store.write_json_atomic(draft_dir / "proposal.json", meta)
+    if use_git and git_available():
+        return git_commit([store.patterns_dir() / f"{proposal['pattern_key']}.json", draft_dir],
+                          f"learned: reject {proposal['type']} {proposal['name']}\n\nReason: {reason}")
+    return None
+
+
+def uninstall(name: str, *, reason: str | None = None, use_git: bool = True) -> str | None:
+    reg = load_registry()
+    entry = reg["installed"].pop(name, None)
+    if not entry:
+        raise InstallError(f"{name!r} is not installed")
+    dest = install_root() / entry["path"]
+    if entry.get("symlink"):
+        link = Path(entry["symlink"])
+        if link.is_symlink():
+            link.unlink()
+    shutil.rmtree(dest, ignore_errors=True)
+    reg["history"].append({"event": "uninstall", "name": name, "version": entry["version"], "at": store.now(),
+                           "note": reason})
+    _save_registry(reg)
+    pattern = store.load_pattern(entry["pattern_key"])
+    if pattern:
+        pattern["status"] = "retired"
+        pattern["retired"] = {"at": store.now(), "reason": reason}
+        store.save_pattern(pattern)
+    if use_git and git_available():
+        return git_commit([dest, registry_path(), store.patterns_dir() / f"{entry['pattern_key']}.json"],
+                          f"learned: uninstall {entry['type']} {name}" + (f"\n\nReason: {reason}" if reason else ""))
+    return None
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    sub = ap.add_subparsers(dest="cmd", required=True)
+    sub.add_parser("list")
+    p = sub.add_parser("uninstall"); p.add_argument("name"); p.add_argument("--reason")
+    p.add_argument("--no-git", action="store_true")
+    a = ap.parse_args(argv)
+    if a.cmd == "list":
+        reg = load_registry()
+        if not reg["installed"]:
+            print("nothing installed")
+        for e in reg["installed"].values():
+            print(f"{e['type']:7} {e['name']:24} v{e['version']}  {e['path']}  "
+                  f"(pattern {e['pattern_key']}, approved {e['approved_at'][:10]})")
+        return 0
+    try:
+        c = uninstall(a.name, reason=a.reason, use_git=not a.no_git)
+    except InstallError as e:
+        sys.exit(f"error: {e}")
+    print(f"uninstalled {a.name}" + (f" (commit {c})" if c else ""))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

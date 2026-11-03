@@ -3,7 +3,7 @@
 Turns repeated Claude Code work into reusable skills, scripts and tools. **Nothing installs without explicit human approval.**
 
 Pipeline: CAPTURE → DETECT → CLASSIFY → GENERATE → VALIDATE → APPROVE → REGISTER → REFINE.
-Status: **Phases 1–3 (Capture, Detect + classify, Generate + validate) are done.** Phases 4–5 are stubs. Nothing is ever installed automatically.
+Status: **Phases 1–4 are done** (Capture, Detect + classify, Generate + validate, Review + register). Phase 5 (Refine) and the MCP tool server are stubs. Nothing is ever installed without your explicit approval.
 
 ## Phase 1: Capture
 
@@ -108,3 +108,35 @@ If validation passes, the pattern's status becomes `proposed` and it waits for P
 Skills are checked statically only: frontmatter `name`/`description`, and any `scripts/...` they reference must exist. Behavioural evaluation of skills needs a model run and isn't implemented yet.
 
 **Note:** tests are built from real session data, so `generated/` contains (redacted) snippets of your sessions, and that folder is committed to git.
+
+## Phase 4: Review + register
+
+```bash
+python3 review/cli.py proposals                  # drafts: status, times seen, tests, blocking flags
+python3 review/cli.py review csv-to-json         # evidence, rating notes, spec, full code, scan, tests
+python3 review/cli.py diff csv-to-json           # vs the installed version (all new on first install)
+python3 review/cli.py revalidate csv-to-json     # after hand-editing generated/<name>/files or the tests
+python3 review/cli.py approve csv-to-json --note "..."   # asks you to type the name to confirm
+python3 review/cli.py reject csv-to-json --reason "..."
+python3 registry/install.py list
+python3 registry/install.py uninstall csv-to-json --reason "..."
+```
+
+**The approval gate (`review/cli.py approve`):**
+1. Reads the draft from disk once. Those exact bytes are re-validated and, if approved, installed, so nothing can change in between.
+2. Re-runs the full validation (provenance, coverage, sandbox tests, safety scan). Any failure means no install.
+3. Shows what will be installed and where, then asks you to **type the draft name**. With no interactive terminal it refuses unless you pass `--yes` explicitly.
+4. Refuses if the pattern is `rejected` or `retired`, if the draft is already decided, or if the install root isn't a git repo (`--no-git` overrides).
+
+**Where things go (`registry/install.py`):**
+| Type | Installed to | Notes |
+|---|---|---|
+| script | `scripts/<name>/` | Entrypoint made executable: `python3 scripts/<name>/<entry> --help` |
+| skill | `skills/<name>/`, plus a symlink `~/.claude/skills/<name>` pointing to it | Git stays the source of truth; reverting the commit reverts the skill |
+| tool | not yet | Needs `mcp_tools/server.py`, which isn't built; approval refuses with a clear message |
+
+`registry.json` records each installed artifact: version, pattern, evidence sessions, file hashes, test results, approval time and note, and a usage counter for Phase 5. It also keeps a `history` of installs and uninstalls.
+
+**Git:** install, reject and uninstall each make one commit (`learned: install script csv-to-json v1`, with the evidence and test counts in the body). The commit covers **only** the paths that action touched, so unrelated work in your tree is never swept in. To undo a learned habit, run `registry/install.py uninstall`, or `git revert` the commit.
+
+**Rejections are remembered:** the pattern is locked as `rejected` with your reason. `propose.py` won't draft it again (except with `--force`), and re-clustering keeps the status.

@@ -226,6 +226,9 @@ def validate_draft(proposal: dict, files: dict[str, str], pattern: dict, *, allo
     cache: dict = {}
     for t in tests:
         probs = check_provenance(t, members, cache)
+        if proposal["type"] in ("script", "tool") and t.get("provenance") in ("logged", "derived_from_feedback") \
+                and not t.get("expected_files") and t.get("stdout_compare", "ignore") == "ignore":
+            probs.append("checks no output (needs expected_files or stdout_compare), so it can't count as evidence")
         report["provenance"].append({"name": t["name"], "provenance": t.get("provenance"), "problems": probs})
         if probs:
             report["problems"] += [f"[{t['name']}] {p}" for p in probs]
@@ -270,7 +273,15 @@ def validate_draft(proposal: dict, files: dict[str, str], pattern: dict, *, allo
             if ref not in files:
                 report["problems"].append(f"SKILL.md references missing file {ref}")
     report["passed"] = not report["problems"]
+    report["fingerprint"] = fingerprint(files, tests)
     return report
+
+
+def fingerprint(files: dict[str, str], tests: list) -> str:
+    """Hash of exactly what was validated: file bytes + tests. Used to detect edits after validation."""
+    import hashlib
+    blob = json.dumps({"files": dict(sorted(files.items())), "tests": tests}, sort_keys=True, ensure_ascii=False)
+    return hashlib.sha256(blob.encode("utf-8")).hexdigest()[:16]
 
 
 def load_draft(name: str) -> tuple[dict, dict[str, str], Path]:

@@ -147,6 +147,12 @@ class Phase3(unittest.TestCase):
         r = self.run_propose(max_attempts=1)
         self.assertTrue(any("no rating note" in p for p in r["problems"]), r["problems"])
 
+    def test_logged_test_must_check_an_output(self):
+        hollow = {**test_case("s-fruit"), "expected_files": []}
+        self.fake(proposal(tests=[hollow, test_case("s-price"), test_case("s-kv", "derived_from_feedback", '[{"k":"x","v":1}]')]))
+        r = self.run_propose(max_attempts=1)
+        self.assertTrue(any("checks no output" in p for p in r["problems"]), r["problems"])
+
     def test_coverage_required(self):
         self.fake(proposal(tests=[test_case("s-fruit")]))
         r = self.run_propose(max_attempts=1)
