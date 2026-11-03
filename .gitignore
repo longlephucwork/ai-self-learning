@@ -1,0 +1,5 @@
+# Session data never goes in git (it's personal and may contain residual secrets)
+store/*
+!store/.gitkeep
+__pycache__/
+*.pyc

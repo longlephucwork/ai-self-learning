@@ -1,0 +1,12 @@
+{"type":"user","sessionId":"test-sess-1","timestamp":"2026-11-01T10:00:00Z","cwd":"/proj","gitBranch":"main","version":"2.1.300","entrypoint":"cli","message":{"role":"user","content":"Convert data.csv to JSON <system-reminder>ignore me</system-reminder>"}}
+{"type":"assistant","sessionId":"test-sess-1","timestamp":"2026-11-01T10:00:05Z","message":{"model":"claude-x","content":[{"type":"thinking","thinking":"","signature":"AAAA"},{"type":"text","text":"Reading the file."},{"type":"tool_use","id":"tu1","name":"Read","input":{"file_path":"/proj/data.csv"}}]}}
+{"type":"user","sessionId":"test-sess-1","timestamp":"2026-11-01T10:00:06Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tu1","content":"a,b\n1,2"}]}}
+{"type":"assistant","sessionId":"test-sess-1","timestamp":"2026-11-01T10:00:08Z","message":{"model":"claude-x","content":[{"type":"tool_use","id":"tu2","name":"Bash","input":{"command":"export ANTHROPIC_API_KEY=sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123 && python conv.py"}}]}}
+{"type":"user","sessionId":"test-sess-1","timestamp":"2026-11-01T10:00:09Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tu2","is_error":true,"content":"Traceback: boom"}]}}
+{"type":"assistant","sessionId":"test-sess-1","timestamp":"2026-11-01T10:00:10Z","message":{"model":"claude-x","content":[{"type":"tool_use","id":"tu3","name":"Write","input":{"file_path":"/proj/data.json","content":"[{\"a\":1,\"b\":2}]"}}]}}
+{"type":"user","sessionId":"test-sess-1","timestamp":"2026-11-01T10:00:11Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tu3","content":"ok"}]}}
+{"type":"user","sessionId":"test-sess-1","timestamp":"2026-11-01T10:00:12Z","isSidechain":true,"message":{"role":"user","content":"subagent prompt"}}
+{"type":"user","sessionId":"test-sess-1","timestamp":"2026-11-01T10:00:13Z","message":{"role":"user","content":"<command-name>/review</command-name><command-args>now</command-args>"}}
+{"type":"user","sessionId":"test-sess-1","timestamp":"2026-11-01T10:00:13Z","message":{"role":"user","content":"<local-command-stdout>noise</local-command-stdout>"}}
+{"type":"assistant","sessionId":"test-sess-1","timestamp":"2026-11-01T10:00:20Z","message":{"model":"claude-x","content":[{"type":"text","text":"Done: wrote data.json"}]}}
+not json at all

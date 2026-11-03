@@ -1,0 +1,151 @@
+#!/usr/bin/env python3
+"""Claude Code hook: ingest a session transcript into the learning-harness store.
+
+Wired to both Stop (fires after every turn, so data survives sessions that are
+killed without a clean exit) and SessionEnd (records end time + reason).
+Ingestion is idempotent: each run re-derives the session from the transcript.
+
+Hook mode (stdin = hook JSON payload):
+    log_session.py
+Manual / backfill:
+    log_session.py --transcript PATH
+    log_session.py --backfill [DIR]      # default ~/.claude/projects
+
+Never fails the host session: errors go to store/hook_errors.log, exit 0.
+Set LEARNING_HARNESS_DISABLE=1 to skip logging (used by the harness's own
+headless `claude -p` calls so it doesn't learn from itself).
+"""
+from __future__ import annotations
+
+import argparse
+import gzip
+import json
+import os
+import sys
+import traceback
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from harness_lib import db  # noqa: E402
+from harness_lib.redact import redact_obj  # noqa: E402
+from harness_lib.transcript import parse_transcript  # noqa: E402
+
+DROP_KEYS = {"signature"}  # opaque, large, useless for learning
+
+
+def _strip(obj):
+    if isinstance(obj, dict):
+        return {k: _strip(v) for k, v in obj.items() if k not in DROP_KEYS}
+    if isinstance(obj, list):
+        return [_strip(x) for x in obj]
+    return obj
+
+
+def copy_transcript(src: str, session_id: str) -> str:
+    """Write a redacted, gzipped copy of the transcript into the store."""
+    out_dir = db.store_dir() / "transcripts"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    dst = out_dir / f"{session_id}.jsonl.gz"
+    tmp = dst.with_suffix(".tmp")
+    with open(src, encoding="utf-8", errors="replace") as fin, gzip.open(tmp, "wt", encoding="utf-8") as fout:
+        for line in fin:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                obj = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            fout.write(json.dumps(redact_obj(_strip(obj)), ensure_ascii=False) + "\n")
+    os.replace(tmp, dst)
+    return str(dst)
+
+
+def ingest(transcript_path: str, *, hook_event: str | None = None, end_reason: str | None = None,
+           session_id: str | None = None, last_assistant_message: str | None = None,
+           con=None) -> str | None:
+    transcript_path = os.path.expanduser(transcript_path)
+    if not os.path.isfile(transcript_path):
+        raise FileNotFoundError(transcript_path)
+    s = parse_transcript(transcript_path)
+    s.session_id = session_id or s.session_id or Path(transcript_path).stem
+    if not s.requests and not s.steps:
+        return None  # empty / metadata-only transcript
+    copy = copy_transcript(transcript_path, s.session_id)
+    lam = redact_obj(last_assistant_message) if last_assistant_message else None
+    own = con is None
+    con = con or db.connect()
+    try:
+        db.upsert_session(con, s, transcript_path=transcript_path, transcript_copy=copy,
+                          hook_event=hook_event, end_reason=end_reason, last_assistant_message=lam)
+    finally:
+        if own:
+            con.close()
+    return s.session_id
+
+
+def _log_error(msg: str) -> None:
+    try:
+        with open(db.store_dir() / "hook_errors.log", "a") as fh:
+            fh.write(f"{db.now()} {msg}\n")
+    except Exception:
+        pass
+
+
+def hook_main() -> int:
+    raw = sys.stdin.read()
+    try:
+        payload = json.loads(raw) if raw.strip() else {}
+    except json.JSONDecodeError:
+        _log_error(f"bad hook payload: {raw[:200]!r}")
+        return 0
+    event = payload.get("hook_event_name")
+    if event == "Stop" and payload.get("stop_hook_active"):
+        return 0  # we're inside a stop-hook continuation loop; nothing new to log
+    tp = payload.get("transcript_path")
+    if not tp:
+        _log_error(f"no transcript_path in {event} payload")
+        return 0
+    ingest(tp, hook_event=event,
+           end_reason=payload.get("reason") if event == "SessionEnd" else None,
+           session_id=payload.get("session_id"),
+           last_assistant_message=payload.get("last_assistant_message"))
+    return 0
+
+
+def main() -> int:
+    if os.environ.get("LEARNING_HARNESS_DISABLE") == "1":
+        return 0
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--transcript", help="ingest one transcript file")
+    ap.add_argument("--backfill", nargs="?", const="~/.claude/projects", help="ingest every *.jsonl under DIR")
+    args = ap.parse_args()
+    try:
+        if args.transcript:
+            print(ingest(args.transcript, hook_event="manual"))
+        elif args.backfill:
+            root = Path(os.path.expanduser(args.backfill))
+            con = db.connect()
+            n = 0
+            for p in sorted(root.rglob("*.jsonl")):
+                if "subagents" in p.parts:
+                    continue
+                try:
+                    if ingest(str(p), hook_event="backfill", con=con):
+                        n += 1
+                except Exception as e:  # keep going
+                    print(f"skip {p}: {e}", file=sys.stderr)
+            con.close()
+            print(f"ingested {n} sessions from {root}")
+        else:
+            return hook_main()
+    except Exception:
+        _log_error(traceback.format_exc().replace("\n", " | "))
+        if args.transcript or args.backfill:
+            raise
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
