@@ -9,7 +9,7 @@ One run:
   2. summarise new sessions and group them into patterns
   3. draft up to `max_drafts_per_run` new candidates (a failed candidate is retried after `retry_days`)
   4. with any drafts left in that budget, propose promotions: skills practised often and accurately on
-     mechanical inputs become tools (refine/memory.py)
+     mechanical inputs become tools, or scripts with promote_as: "script" (refine/memory.py)
 
 Settings, in store/config.json under "auto" (defaults shown):
   enabled: false   monthly_budget_usd: 5.0   min_hours_between_runs: 6   min_new_sessions: 3
@@ -17,6 +17,7 @@ Settings, in store/config.json under "auto" (defaults shown):
   min_success: 3   (successful sessions before a task is learned; 1 = learn every task after one success)
   keep_days: 90    (finished one-off sessions older than this, evidence for nothing, are deleted)
   promote_min_uses: 5   promote_min_accuracy: 0.9   promote_min_mechanical: 0.75
+  promote_as: "tool"   (what a promoted skill becomes: "tool" or "script")
 Every model call's cost goes to store/spend.jsonl. Background runs stop when the month's spend reaches
 the budget, and each call's own limit is capped at what remains.
 """
@@ -37,7 +38,8 @@ from harness_lib.schema_check import validate
 DEFAULTS = {"enabled": False, "monthly_budget_usd": 5.0, "min_hours_between_runs": 6, "min_new_sessions": 3,
             "keep_days": 90,
             "max_drafts_per_run": 1, "retry_days": 7, "min_confidence": 0.6, "min_success": 3,
-            "promote_min_uses": 5, "promote_min_accuracy": 0.9, "promote_min_mechanical": 0.75}
+            "promote_min_uses": 5, "promote_min_accuracy": 0.9, "promote_min_mechanical": 0.75,
+            "promote_as": "tool"}
 LOCK_STALE_S = 2 * 3600
 RETRY_AFTER_FAILURE = timedelta(hours=1)
 _children: list = []   # keep spawned runs referenced, so their handles aren't collected while they run
@@ -484,7 +486,7 @@ def run(*, force: bool = False) -> dict:
                 log(f"  drafting {p['key']} failed: {str(e)[:150]}")
                 if "budget" in str(e):
                     break
-        # 4. muscle memory: practised, accurate, mechanical skills become tools
+        # 4. muscle memory: practised, accurate, mechanical skills become tools (or scripts: promote_as)
         from refine import memory
         from registry import install as reg
         left = cfg["max_drafts_per_run"] - len(drafted)

@@ -39,7 +39,7 @@ If you decline, a background run (every few hours, within $5/month) still learns
 
 The Claude desktop and web apps don't load these.
 
-**Muscle memory:** a skill you use often and accurately, for a task that's mechanical, gets proposed as a tool. Claude then just calls it instead of reasoning through the task each time. If the tool starts failing, `refine.py demote` brings the skill back. Tasks that need judgment stay skills.
+**Muscle memory:** a skill you use often and accurately, for a task that's mechanical, gets proposed as a tool (or a script: `refine.py promote <skill> --as script`, or `"promote_as": "script"` in `store/config.json` for the background run). Claude then just calls it instead of reasoning through the task each time. If it starts failing, `refine.py demote` brings the skill back. Tasks that need judgment stay skills.
 
 You can also do it all by hand. Run these from `~/claude-learning-harness` (on Windows, use `python` instead of `python3`):
 

@@ -9,8 +9,8 @@
   refine.py learn [session]                    quick learn: draft from ONE session now (default: this/last session)
   refine.py confirm <pattern> --accepted ID... [--redone ID...]   record what the user said about unclear
                                                sessions; learns the task right away if it now qualifies
-  refine.py promote <skill>                    turn a well-practised skill into a tool (muscle memory)
-  refine.py demote <tool>                      bring back the skill a promoted tool replaced
+  refine.py promote <skill> [--as tool|script] turn a well-practised skill into a tool or script (muscle memory)
+  refine.py demote <tool|script>               bring back the skill a promoted tool or script replaced
   refine.py prune [--days N] [--dry-run]       delete old one-off sessions that are evidence for nothing
   refine.py auto [--force]                     one automatic-learning run (normally started by the SessionEnd hook)
   refine.py auto-status                        settings, budget, last run, drafts waiting
@@ -270,6 +270,8 @@ def main(argv=None):
     p = sub.add_parser("confirm"); p.add_argument("pattern")
     p.add_argument("--accepted", nargs="*", default=[]); p.add_argument("--redone", nargs="*", default=[])
     p = sub.add_parser("promote"); p.add_argument("name"); p.add_argument("--model")
+    p.add_argument("--as", dest="as_type", choices=["tool", "script"],
+                   help='what to turn the skill into (default: "promote_as" in the auto config, else tool)')
     p = sub.add_parser("demote"); p.add_argument("name"); p.add_argument("--yes", action="store_true")
     p = sub.add_parser("auto"); p.add_argument("--force", action="store_true", help="ignore the throttle")
     sub.add_parser("auto-status")
@@ -388,7 +390,7 @@ def main(argv=None):
         from harness_lib.claude_cli import ClaudeError
         from refine import memory
         try:
-            r = memory.promote(a.name, model=a.model)
+            r = memory.promote(a.name, as_type=a.as_type, model=a.model)
         except (LookupError, ValueError, ClaudeError) as e:
             sys.exit(f"error: {e}")
         name = Path(r["draft"]).name if r.get("draft") else None
@@ -407,7 +409,8 @@ def main(argv=None):
             r = memory.demote(a.name)
         except LookupError as e:
             sys.exit(f"error: {e}")
-        print(f"restored skill {r['skill']} (v{r['skill_version']}) and removed tool {r['removed_tool']}")
+        print(f"restored skill {r['skill']} (v{r['skill_version']}) and removed {r['removed_type']} "
+              f"{r['removed_tool']}")
         return 0
     elif a.cmd == "auto":
         from refine import auto

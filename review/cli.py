@@ -274,8 +274,8 @@ def cmd_approve(args):
         how = f"wraps the installed script {proposal['wraps']['script']}" if proposal.get("wraps") else "new code"
         print(f"  served by the MCP server as mcp__learned__{proposal['name']} ({how})")
     if proposal.get("promotes"):
-        print(f"  and retire the skill {proposal['promotes']['skill']}: Claude will call the tool instead of "
-              f"reasoning through the task")
+        print(f"  and retire the skill {proposal['promotes']['skill']}: Claude will call the {proposal['type']} "
+              f"instead of reasoning through the task")
     if proposal.get("quick"):
         print("  note: learned from a single session (quick learn)")
     if not args.yes:

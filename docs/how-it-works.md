@@ -303,14 +303,14 @@ The harness has two levels, like a person learning a task:
 | Level | Artifact | Who does the work |
 |---|---|---|
 | Thinking | skill | Claude reads the instructions and reasons through the task every time |
-| Automatic | MCP tool | code does the job; Claude makes one call and doesn't reason through it |
+| Automatic | MCP tool or script | code does the job; Claude makes one call and doesn't reason through it |
 
 - **Practice:** every use of a skill is tracked. Accuracy is the share of uses whose session you accepted; `edited` and `redone` don't count as accurate. `refine.py report` shows each skill's uses, accuracy and level.
 - **Automate:** a skill used at least `promote_min_uses` (5) times, with accuracy of at least `promote_min_accuracy` (0.9), whose uses were mostly mechanical (`promote_min_mechanical`, 0.75, of their sessions summarised as deterministic), is reported as `promote`. The background run can draft it too.
-  - `refine.py promote <skill>` drafts a tool whose tests are the real inputs and outputs of those uses.
-  - Approving it installs the tool and retires the skill, so Claude stops loading it.
+  - `refine.py promote <skill>` drafts a tool whose tests are the real inputs and outputs of those uses. `refine.py promote <skill> --as script` drafts a script instead (run from the shell, listed for Claude at session start). The background run drafts whatever `"promote_as"` says (`"tool"` by default, or `"script"`).
+  - Approving it installs the tool or script and retires the skill, so Claude stops loading it.
 - **Judgment stays thinking:** a skill whose uses need judgment (writing, deciding) is never promoted. No script can reproduce judgment, and the report says so.
-- **Relearn:** a promoted tool that keeps failing is reported as `demote`. `refine.py demote <tool>` restores the original skill from `learned/` and removes the tool, so Claude reasons through the task again.
+- **Relearn:** a promoted tool or script that keeps failing is reported as `demote`. `refine.py demote <name>` restores the original skill from `learned/` and removes the tool or script, so Claude reasons through the task again.
 - **Forgetting:** anything unused for 60 days is suggested for retirement.
 
 The thresholds are in `store/config.json` under `"auto"`. Nothing changes without your approval.

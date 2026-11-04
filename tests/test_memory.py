@@ -233,6 +233,62 @@ class Memory(p4.Phase4):
         self.assertEqual(sorted(install.load_registry()["installed"]), ["csv-skill"])
         self.assertTrue(link.is_symlink())                                       # thinking again
 
+    def script_proposal(self, sids):
+        prop = self.tool_proposal(sids)
+        script = ('import csv, json, sys\n'
+                  'conv = lambda v: int(v) if v.isdigit() else (float(v) if v.replace(".", "", 1).isdigit() else v)\n'
+                  'rows = [{k: conv(v) for k, v in r.items()} for r in csv.DictReader(open(sys.argv[1], newline=""))]\n'
+                  'json.dump(rows, open(sys.argv[2], "w"))\n')
+        for t in prop["tests"]:
+            t["args"], t["stdin"] = ["in.csv", "out.json"], ""
+        return {**prop, "type": "script", "entrypoint": "csv_script.py", "tool_input_schema_json": "",
+                "files": [{"path": "csv_script.py", "content": script}]}
+
+    def test_promote_to_script_approve_then_demote(self):
+        from refine import memory
+        from registry import install
+        self.install_skill()
+        sids = self.use_skill(5)
+        link = Path(os.environ["LEARNING_HARNESS_SKILLS_DIR"]) / "csv-skill"
+        self.fake(self.script_proposal(sids))
+        r = memory.promote("csv-skill", as_type="script", log=lambda *_: None)
+        self.assertTrue(r["passed"], r["problems"])
+        self.assertTrue(r["draft"].endswith("csv-skill-auto"))
+        rc, out = self.cli("approve", "csv-skill-auto", "--yes")
+        self.assertEqual(rc, 0, out)
+        self.assertIn("retired skill csv-skill", out)
+        reg = install.load_registry()["installed"]
+        self.assertEqual(sorted(reg), ["csv-skill-auto"])
+        self.assertEqual(reg["csv-skill-auto"]["type"], "script")
+        self.assertEqual(reg["csv-skill-auto"]["promoted_from"]["skill"], "csv-skill")
+        self.assertFalse(link.exists() or link.is_symlink())
+        m = memory.demote("csv-skill-auto")
+        self.assertEqual((m["skill"], m["removed_type"]), ("csv-skill", "script"))
+        self.assertEqual(sorted(install.load_registry()["installed"]), ["csv-skill"])
+        self.assertTrue(link.is_symlink())
+
+    def test_promote_rejects_the_wrong_type(self):
+        from refine import memory
+        self.install_skill()
+        sids = self.use_skill(5)
+        self.fake(self.tool_proposal(sids))                  # model returns a tool when a script was asked for
+        r = memory.promote("csv-skill", as_type="script", log=lambda *_: None)
+        self.assertFalse(r["passed"])
+        self.assertTrue(any("must be a script" in p for p in r["problems"]), r["problems"])
+        with self.assertRaises(ValueError):
+            memory.promote("csv-skill", as_type="skill", log=lambda *_: None)
+
+    def test_background_run_promotes_to_script_when_configured(self):
+        from refine import auto
+        self.install_skill()
+        sids = self.use_skill(5)
+        self.fake(self.script_proposal(sids))
+        auto.set_config(enabled=True, min_new_sessions=1, promote_as="script")
+        r = auto.run(force=True)
+        promos = [d for d in r["drafted"] if d.get("promotes")]
+        self.assertEqual(len(promos), 1, r)
+        self.assertTrue(promos[0]["passed"], r)
+
     def test_report_shows_practice(self):
         from refine import refine
         self.install_skill()
