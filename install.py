@@ -499,10 +499,24 @@ def _self_test(repo):
     return r.returncode == 0, (r.stdout + r.stderr)
 
 
+def relink_learned() -> None:
+    """Make sure Claude Code can see every approved skill (repairs links from older installs)."""
+    try:
+        sys.path.insert(0, str(REPO))
+        from registry import install as reg
+        fixed = reg.relink_skills()
+    except Exception as e:  # never fail an install over this
+        say(f"  (couldn't check learned skills: {e})")
+        return
+    if fixed:
+        ok(f"linked {len(fixed)} learned skill(s) into ~/.claude/skills so Claude Code loads them: {', '.join(fixed)}")
+
+
 def _refresh_after_update(repo):
     """New releases may add hooks; re-apply the user-scope hooks if they're installed (same Python)."""
     if hooks_installed():
         run([sys.executable, str(repo / "hooks" / "install_hooks.py"), "--scope", "user", "--python", python_exe()])
+    relink_learned()
 
 
 def update_cmd(a, ui) -> int:
@@ -629,6 +643,7 @@ def simple_install(a, ui: UI) -> int:
         setup_auto(enable=True, budget=budget)
     if not a.no_learn_skill:
         setup_builtin_skill()
+    relink_learned()
     if not a.no_mcp:
         setup_mcp()
     if not a.no_path:
@@ -750,6 +765,7 @@ def main(argv=None) -> int:
         say("  skipped (--no-learn-skill)")
     elif ui.ask("Add a skill so you can say \"learn this\" in a session to learn from it right away?"):
         setup_builtin_skill()
+    relink_learned()
     say("\n8. updates")
     if a.no_update_check:
         say("  skipped (--no-update-check)")

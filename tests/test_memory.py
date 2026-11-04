@@ -293,6 +293,15 @@ class Memory(p4.Phase4):
         self.assertEqual(auto.improvements_needed(), [])                  # once per version
         self.assertIn("an update of the skill 'csv-skill'", auto.session_start_context())
 
+    def test_missing_skill_link_is_repaired(self):
+        from registry import install
+        self.install_skill()
+        link = Path(os.environ["LEARNING_HARNESS_SKILLS_DIR"]) / "csv-skill"
+        link.unlink()
+        self.assertEqual(install.relink_skills(), ["csv-skill"])
+        self.assertTrue((link / "SKILL.md").is_file())
+        self.assertEqual(install.relink_skills(), [])                     # nothing to fix the second time
+
     def test_accurate_skill_is_left_alone(self):
         from refine import auto
         self.install_skill()

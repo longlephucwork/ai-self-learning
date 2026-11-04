@@ -56,6 +56,46 @@ def ensure_learned_repo() -> None:
                                     encoding="utf-8")
 
 
+def _link_skill(dest: Path, link: Path) -> None:
+    """Make ~/.claude/skills/<name> point at the installed skill (a marked copy where symlinks aren't allowed)."""
+    link.parent.mkdir(parents=True, exist_ok=True)
+    if link.exists() and (link / COPY_MARKER).exists():
+        shutil.rmtree(link)  # our earlier copy; refresh it
+    if not link.is_symlink() and not link.exists():
+        try:
+            link.symlink_to(dest.resolve(), target_is_directory=True)
+        except OSError:
+            # Windows without developer mode can't create symlinks: install a marked copy instead.
+            shutil.copytree(dest, link)
+            (link / COPY_MARKER).write_text(f"copy of {dest}; managed by learning-harness\n", encoding="utf-8")
+
+
+def relink_skills() -> list[str]:
+    """Repair: link every installed skill that Claude Code can't currently see. Returns the names fixed."""
+    fixed = []
+    reg = load_registry()
+    for e in reg["installed"].values():
+        if e["type"] != "skill":
+            continue
+        dest = install_root() / e["path"]
+        link = skills_link_dir() / e["name"]
+        if not (dest / "SKILL.md").is_file():
+            continue
+        ours = (link.is_symlink() and link.resolve() == dest.resolve()) or (link / COPY_MARKER).exists()
+        if link.is_symlink() and not link.exists():
+            link.unlink()  # dangling (e.g. the repo moved)
+        elif link.exists() and not ours:
+            continue       # someone else's folder of that name; leave it
+        if ours and link.is_symlink():
+            continue
+        _link_skill(dest, link)
+        if e.get("symlink") != str(link):
+            e["symlink"] = str(link)
+            store.write_json_atomic(registry_path(), reg)
+        fixed.append(e["name"])
+    return fixed
+
+
 def skills_link_dir() -> Path:
     return Path(os.environ.get("LEARNING_HARNESS_SKILLS_DIR", Path.home() / ".claude" / "skills"))
 
@@ -242,16 +282,7 @@ def install(proposal: dict, files: dict[str, str], *, draft_dir: Path, note: str
     dest.parent.mkdir(parents=True, exist_ok=True)
     store._replace(str(tmp), dest)  # retried on Windows (e.g. a virus scanner holding the folder)
     if link is not None:
-        link.parent.mkdir(parents=True, exist_ok=True)
-        if link.exists() and (link / COPY_MARKER).exists():
-            shutil.rmtree(link)  # our earlier copy; refresh it
-        if not link.is_symlink() and not link.exists():
-            try:
-                link.symlink_to(dest.resolve(), target_is_directory=True)
-            except OSError:
-                # Windows without developer mode can't create symlinks: install a marked copy instead.
-                shutil.copytree(dest, link)
-                (link / COPY_MARKER).write_text(f"copy of {dest}; managed by learning-harness\n", encoding="utf-8")
+        _link_skill(dest, link)
 
     pattern = store.load_pattern(proposal["pattern_key"]) or {}
     entry = {
