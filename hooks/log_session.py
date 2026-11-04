@@ -141,6 +141,10 @@ def session_start() -> int:
     text = "\n\n".join(parts)
     if text:
         print(json.dumps({"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": text}}))
+    # SessionEnd doesn't fire when a terminal window is just closed, so start the (throttled, detached)
+    # background work from here as well; both return at once and do nothing when not due.
+    maybe_start_auto()
+    maybe_check_update()
     return 0
 
 

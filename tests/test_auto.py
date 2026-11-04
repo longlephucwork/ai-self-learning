@@ -288,8 +288,16 @@ class Auto(unittest.TestCase):
             spawn.assert_not_called()                                       # automatic learning is off
             self.auto.set_config(enabled=True, min_new_sessions=1)
             self.hook({"session_id": "s-fruit", "transcript_path": tp, "hook_event_name": "Stop"})
-            spawn.assert_not_called()                                       # only SessionEnd triggers it
+            spawn.assert_not_called()                                       # not after every turn
             self.hook({"session_id": "s-fruit", "transcript_path": tp, "hook_event_name": "SessionEnd", "reason": "other"})
+            spawn.assert_called_once()
+
+    def test_session_start_also_starts_a_due_run(self):
+        """A closed terminal window skips SessionEnd; the next SessionStart catches up."""
+        self.add_sessions()
+        self.auto.set_config(enabled=True, min_new_sessions=1)
+        with mock.patch.object(self.auto, "spawn_in_background") as spawn, redirect_stdout(io.StringIO()):
+            self.hook({"session_id": "new", "hook_event_name": "SessionStart", "source": "startup"})
             spawn.assert_called_once()
 
     def test_session_start_note(self):

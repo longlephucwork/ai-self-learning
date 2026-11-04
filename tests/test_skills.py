@@ -162,7 +162,7 @@ class Skills(p4.Phase4):
         write_brief("notes-skill")                                              # a new brief version
         with mock.patch("validate.replay.find_skill_creator", return_value=None):
             text = auto.session_start_context()
-        self.assertIn("skill-creator isn't installed here", text)
+        self.assertIn("skill-creator wasn't found", text)
 
 
 for _n in [n for n in vars(p4.Phase4) if n.startswith("test_")]:

@@ -31,6 +31,7 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent
@@ -594,6 +595,53 @@ def auto_status() -> None:
         ok(f"{n} draft(s) waiting for you: python3 review/cli.py proposals")
 
 
+# ---------------- skill-creator (Anthropic's skill builder; every learned skill is built with it) ----------------
+
+def skills_repo() -> str:
+    return os.environ.get("LEARNING_HARNESS_SKILLS_REPO", "https://github.com/anthropics/skills")
+
+
+def skill_creator_path():
+    sys.path.insert(0, str(REPO))
+    from validate.replay import find_skill_creator
+    return find_skill_creator()
+
+
+def setup_skill_creator() -> bool:
+    """Copy skills/skill-creator from github.com/anthropics/skills into ~/.claude/skills, if it isn't there."""
+    have = skill_creator_path()
+    if have:
+        ok(f"skill-creator found ({have})")
+        return True
+    dest = Path.home() / ".claude" / "skills" / "skill-creator"
+    if dest.exists():
+        warn(f"{dest} exists but isn't a complete skill-creator; left it alone")
+        return False
+    tmp = Path(tempfile.mkdtemp(prefix="lh-skills-"))
+    try:
+        steps = [["git", "clone", "--quiet", "--depth", "1", "--filter=blob:none", "--sparse", skills_repo(),
+                  str(tmp / "skills")],
+                 ["git", "-C", str(tmp / "skills"), "sparse-checkout", "set", "skills/skill-creator"]]
+        for cmd in steps:
+            p = run(cmd, timeout=180)
+            if p.returncode != 0:
+                raise RuntimeError((p.stderr or p.stdout).strip()[:200])
+        src = tmp / "skills" / "skills" / "skill-creator"
+        if not (src / "SKILL.md").is_file():
+            raise RuntimeError("skills/skill-creator not found in the repository")
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copytree(src, dest)
+    except (OSError, RuntimeError, subprocess.SubprocessError) as e:
+        warn(f"couldn't add skill-creator ({e}). Skills can't be built until it's there: in Claude Code run "
+             f"`/plugin marketplace add anthropics/skills`, or copy skills/skill-creator from {skills_repo()} "
+             f"into {dest}")
+        return False
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+    ok(f"skill-creator added ({dest}): learned skills are built with it")
+    return True
+
+
 # ---------------- the default: one summary, one question ----------------
 
 def simple_install(a, ui: UI) -> int:
@@ -622,6 +670,10 @@ def simple_install(a, ui: UI) -> int:
                     "nothing installs without your OK")
     if not a.no_learn_skill:
         plan.append('let you say "learn this" in any session')
+    need_sc = not a.no_skill_creator and skill_creator_path() is None
+    if need_sc:
+        plan.append("add skill-creator (Anthropic's skill builder, from github.com/anthropics/skills), "
+                    "which builds the skills it learns")
     if not a.no_mcp or not a.no_path:
         plan.append("make the tools and scripts it learns available to Claude")
     if not a.no_update_check:
@@ -643,6 +695,8 @@ def simple_install(a, ui: UI) -> int:
         setup_auto(enable=True, budget=budget)
     if not a.no_learn_skill:
         setup_builtin_skill()
+    if need_sc:
+        setup_skill_creator()
     relink_learned()
     if not a.no_mcp:
         setup_mcp()
@@ -684,6 +738,7 @@ def main(argv=None) -> int:
     ap.add_argument("--no-update-check", action="store_true", help="don't check for new releases daily")
     ap.add_argument("--no-auto", action="store_true", help="don't enable automatic learning")
     ap.add_argument("--no-learn-skill", action="store_true", help="don't add the 'learn this' skill for Claude")
+    ap.add_argument("--no-skill-creator", action="store_true", help="don't add skill-creator if it's missing")
     ap.add_argument("--budget", type=float, default=None, help="monthly budget for automatic learning (USD, default 5)")
     ap.add_argument("--allow-unsandboxed", action="store_true",
                     help="allow generated code/tools to run without network isolation (systems with no sandbox)")
@@ -698,6 +753,8 @@ def main(argv=None) -> int:
         check_prereqs()
         sandbox_status(ui, False, dry=True)
         (ok if hooks_installed() else warn)(f"hooks {'installed' if hooks_installed() else 'not installed'}")
+        sc = skill_creator_path()
+        (ok if sc else warn)(f"skill-creator {sc if sc else 'not found: skills can not be built (install.py adds it)'}")
         (ok if mcp_installed() else warn)(f"MCP server `learned` {'registered' if mcp_installed() else 'not registered'}")
         (ok if path_installed() else warn)(f"bin/ {'on' if path_installed() else 'not on'} PATH")
         auto_status()
@@ -765,6 +822,13 @@ def main(argv=None) -> int:
         say("  skipped (--no-learn-skill)")
     elif ui.ask("Add a skill so you can say \"learn this\" in a session to learn from it right away?"):
         setup_builtin_skill()
+    if a.no_skill_creator:
+        pass
+    elif skill_creator_path():
+        ok(f"skill-creator found ({skill_creator_path()})")
+    elif ui.ask("Add skill-creator (Anthropic's skill builder, from github.com/anthropics/skills)? "
+                "Learned skills are built with it."):
+        setup_skill_creator()
     relink_learned()
     say("\n8. updates")
     if a.no_update_check:

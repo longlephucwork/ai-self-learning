@@ -580,9 +580,10 @@ def brief_context(briefs: list[dict]) -> list[str]:
         what = "an update of the skill" if b.get("improve") else "a new skill"
         lines.append(f"- {what} '{b['name']}' from {len(b['sessions'])} session(s); brief: {b['path']}/BRIEF.md")
     if find_skill_creator() is None:
-        lines.append("skill-creator isn't installed here, so they can't be built yet. Tell the user once, briefly; "
-                     "the briefs wait.")
-        return lines
+        inst = (store.REPO_ROOT / "install.py").as_posix()
+        lines.append("skill-creator wasn't found in ~/.claude/skills or ~/.claude/plugins. If the skill-creator skill "
+                     "is in your skill list anyway, go ahead as below. Otherwise tell the user once, briefly, that "
+                     f"running `{Path(sys.executable).resolve().as_posix()} {inst}` adds it; the briefs wait.")
     b = briefs[0]
     lines += ["At a natural point early in this conversation, mention it in one or two sentences and offer to build "
               "it with skill-creator. Only if the user says yes: use the skill-creator skill, treating BRIEF.md as the "

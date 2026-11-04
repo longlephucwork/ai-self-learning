@@ -430,9 +430,12 @@ def skill_standard_problems(files: dict[str, str], *, expected_name: str | None 
 def find_skill_creator() -> Path | None:
     """skill-creator's folder, if installed (Claude Code user skills, or synced Anthropic skills)."""
     import glob
-    home = Path.home() / ".claude" / "skills"
-    for pat in ("skill-creator", "*/skill-creator", "*/*/skill-creator"):
-        for d in glob.glob(str(home / pat)):
+    claude = Path(os.environ.get("LEARNING_HARNESS_CLAUDE_HOME") or Path.home() / ".claude")
+    pats = [claude / "skills" / p for p in ("skill-creator", "*/skill-creator", "*/*/skill-creator")]
+    # Claude Code plugins (e.g. the anthropics/skills marketplace): ~/.claude/plugins/<...>/skills/skill-creator
+    pats += [claude / "plugins" / ("*/" * n + "skill-creator") for n in range(1, 6)]
+    for pat in pats:
+        for d in sorted(glob.glob(str(pat))):
             if (Path(d) / "scripts" / "quick_validate.py").is_file():
                 return Path(d)
     return None

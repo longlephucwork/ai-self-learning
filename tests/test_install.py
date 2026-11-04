@@ -37,11 +37,46 @@ class Installer(unittest.TestCase):
             fake = t / "claude.cmd"
             fake.write_text(f'@"{sys.executable}" "{t / "claude.py"}" %*\r\n')
         os.environ.update(HOME=str(t / "home"), SHELL="/bin/zsh", LEARNING_HARNESS_CLAUDE_BIN=str(fake),
-                          FAKE_CLAUDE_CALLS=str(t / "calls.json"), LEARNING_HARNESS_STORE=str(t / "store"))
+                          FAKE_CLAUDE_CALLS=str(t / "calls.json"), LEARNING_HARNESS_STORE=str(t / "store"),
+                          LEARNING_HARNESS_SKILLS_REPO=str(t / "no-such-repo"))   # never clone from GitHub
 
     def tearDown(self):
         self.tmp.cleanup()
         os.environ.clear(); os.environ.update(self._env)
+
+    def test_skill_creator_is_added_when_missing(self):
+        import subprocess
+        src = self.t / "skills-src"
+        sc = src / "skills" / "skill-creator"
+        (sc / "scripts").mkdir(parents=True)
+        (sc / "SKILL.md").write_text("---\nname: skill-creator\ndescription: builds skills\n---\n")
+        (sc / "scripts" / "quick_validate.py").write_text("print('ok')\n")
+        (src / "skills" / "other").mkdir(); (src / "skills" / "other" / "SKILL.md").write_text("x")
+        g = ["git", "-C", str(src), "-c", "user.name=t", "-c", "user.email=t@t"]
+        subprocess.run(["git", "init", "-q", str(src)], check=True)
+        subprocess.run(g + ["add", "-A"], check=True)
+        subprocess.run(g + ["commit", "-qm", "skills"], check=True)
+        os.environ["LEARNING_HARNESS_SKILLS_REPO"] = src.as_uri()
+        with redirect_stdout(io.StringIO()):
+            self.assertIsNone(install.skill_creator_path())
+            self.assertTrue(install.setup_skill_creator())
+            dest = self.t / "home" / ".claude" / "skills" / "skill-creator"
+            self.assertTrue((dest / "scripts" / "quick_validate.py").is_file())
+            self.assertFalse((self.t / "home" / ".claude" / "skills" / "other").exists())   # only skill-creator
+            self.assertEqual(install.skill_creator_path(), dest)
+            self.assertTrue(install.setup_skill_creator())                                  # already there
+
+    def test_skill_creator_found_in_a_plugin(self):
+        d = self.t / "home" / ".claude" / "plugins" / "marketplaces" / "anthropic-agent-skills" / "skills" / "skill-creator"
+        (d / "scripts").mkdir(parents=True)
+        (d / "scripts" / "quick_validate.py").write_text("")
+        self.assertEqual(install.skill_creator_path(), d)
+
+    def test_failed_skill_creator_download_explains_what_to_do(self):
+        out = io.StringIO()
+        with redirect_stdout(out):
+            self.assertFalse(install.setup_skill_creator())
+        self.assertIn("/plugin marketplace add anthropics/skills", out.getvalue())
 
     def calls(self):
         return json.loads((self.t / "calls.json").read_text())

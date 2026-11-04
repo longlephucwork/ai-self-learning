@@ -30,7 +30,7 @@ If you decline, a background run (every few hours, within $5/month) still learns
 
 **Learn right away:** say **"learn this"** in any session. Claude asks before installing anything.
 
-**Skills are built with [skill-creator](https://github.com/anthropics/skills).** The harness never writes a skill itself. When a task needs judgment, it prepares a brief from your sessions: what you asked, what you accepted, your corrections, and ready-made test cases. Claude then offers to build the skill with skill-creator, together with you. Scripts and tools are drafted and tested by the harness.
+**Skills are built with [skill-creator](https://github.com/anthropics/skills).** The harness never writes a skill itself. When a task needs judgment, it prepares a brief from your sessions: what you asked, what you accepted, your corrections, and ready-made test cases. Claude then offers to build the skill with skill-creator, together with you. Scripts and tools are drafted and tested by the harness. The installer adds skill-creator if Claude Code doesn't already have it.
 
 **Claude uses what it learned.** In Claude Code:
 - skills load from `~/.claude/skills/`
