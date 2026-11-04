@@ -14,6 +14,7 @@ What changed in each version of the learning harness. The format follows
 - `refine.py demote` brings a skill back from a promoted script as well as a tool, and says which one it removed.
 - `review/cli.py approve` names what will replace the retired skill (the tool or the script).
 - **The transcript copy is append-only.** After each reply, the Stop hook now redacts and stores only the lines added since the last run, instead of reprocessing the whole transcript. On a 10.8 MB transcript, that's about 20 ms instead of about 3 s per reply. The copy is rebuilt from the start whenever the saved position can't be trusted.
+- **Parsing is incremental too.** The parser saves its progress and resumes from it, so each reply's Stop hook reads only the new lines. Together with the append-only copy, a reply's hook on a 10.8 MB transcript takes about 80 ms instead of about 3.3 s. The saved progress holds only redacted text, as `session.json` does.
 
 ## [0.0.2] - 2026-11-04
 

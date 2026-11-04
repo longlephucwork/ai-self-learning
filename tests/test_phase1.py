@@ -232,6 +232,54 @@ class Phase1(unittest.TestCase):
         other.write_bytes(b"".join(lines[:3]))
         self.assertEqual(self._copy(other), self._full(other))               # a different source file
 
+    # ---------------- incremental parse ----------------
+
+    def test_incremental_parse_matches_full_parse(self):
+        """Fed in any chunks, including half lines and tool results that arrive turns later, the resumed
+        parse gives exactly what a full parse gives."""
+        from harness_lib.transcript import parse_incremental, parse_transcript
+        data = FIX.read_bytes()
+        src = Path(self.tmp.name) / "live.jsonl"
+        for step in (1, 7, 50, 333):
+            state = None
+            for cut in [*range(step, len(data), step), len(data)]:
+                src.write_bytes(data[:cut])
+                s, state = parse_incremental(str(src), state)
+                self.assertEqual(s, parse_transcript(str(src)), f"step {step}, cut {cut}")
+        self.assertTrue(s.steps and all(st.result_preview is not None for st in s.steps))
+        self.assertEqual(json.loads(json.dumps(state)), state)               # the state is plain JSON
+
+    def test_ingest_parses_only_new_lines(self):
+        from unittest import mock
+
+        from harness_lib import store
+        from harness_lib.transcript import TranscriptParser, parse_transcript
+        from hooks import log_session
+        lines = FIX.read_bytes().splitlines(keepends=True)
+        src = Path(self.tmp.name) / "inc-parse.jsonl"
+        src.write_bytes(b"".join(lines[:4]))
+        log_session.ingest(str(src), session_id="inc-parse", hook_event="Stop")
+        with open(src, "ab") as fh:
+            fh.write(b"".join(lines[4:]))
+        with mock.patch.object(TranscriptParser, "feed_raw", autospec=True,
+                               side_effect=TranscriptParser.feed_raw) as fed:
+            log_session.ingest(str(src), session_id="inc-parse", hook_event="Stop")
+        self.assertEqual(fed.call_count, len(lines) - 4)                     # earlier lines weren't re-read
+        rec = store.load_session("inc-parse")
+        full = parse_transcript(str(src))
+        self.assertEqual(rec["n_tool_calls"], len(full.steps))
+        self.assertEqual([r["text"] for r in rec["requests"]], [r["text"] for r in full.requests])
+        self.assertEqual(rec["final_result"], full.final_result)
+        state_path = store.session_dir("inc-parse") / log_session.PARSE_STATE
+        before = state_path.stat().st_mtime_ns
+        with mock.patch.object(TranscriptParser, "feed_raw", side_effect=AssertionError("re-read")):
+            log_session.ingest(str(src), session_id="inc-parse", hook_event="SessionEnd", end_reason="other")
+        self.assertEqual(state_path.stat().st_mtime_ns, before)              # nothing new: state not rewritten
+        self.assertEqual(store.load_session("inc-parse")["end_reason"], "other")
+        src.write_bytes(b"".join(lines[:3]))                                 # the source got shorter: start over
+        log_session.ingest(str(src), session_id="inc-parse", hook_event="Stop")
+        self.assertEqual(store.load_session("inc-parse")["n_tool_calls"], len(parse_transcript(str(src)).steps))
+
     def test_stop_hook_active_skipped(self):
         from harness_lib import store
         self._hook({"transcript_path": str(FIX), "hook_event_name": "Stop", "stop_hook_active": True})

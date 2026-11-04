@@ -6,6 +6,7 @@ Layout (root = $LEARNING_HARNESS_STORE or <repo>/store):
     session.json         derived record; rewritten by the hook on each ingest
     transcript.jsonl.gz  redacted copy of the full transcript; appended to (one gzip member per run)
     .transcript.state.json  how far the source has been copied (hooks/log_session.copy_transcript)
+    .parse.state.json    the parser's progress, so the next ingest parses only new lines
     ratings.jsonl        append-only outcome history, last line wins (only `rate` writes it)
   hook_events.jsonl      append-only log of hook invocations
   hook_errors.log

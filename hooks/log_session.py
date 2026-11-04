@@ -19,7 +19,6 @@ from __future__ import annotations
 
 import argparse
 import gzip
-import hashlib
 import json
 import os
 import sys
@@ -31,9 +30,17 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from harness_lib import store  # noqa: E402
 from harness_lib.redact import redact_obj  # noqa: E402
-from harness_lib.transcript import parse_transcript  # noqa: E402
+from harness_lib.transcript import (  # noqa: E402
+    parse_incremental,
+    read_complete_lines,
+    resumable,
+    tail_hash,
+)
 
 DROP_KEYS = {"signature"}  # opaque, large, useless for learning
+COPY_STATE = ".transcript.state.json"  # how far the source has been copied (dot files: bookkeeping, not data)
+COPY_STATE_VERSION = 1
+PARSE_STATE = ".parse.state.json"      # the parser's progress, so the next run parses only new lines
 
 
 def _strip(obj):
@@ -42,11 +49,6 @@ def _strip(obj):
     if isinstance(obj, list):
         return [_strip(x) for x in obj]
     return obj
-
-
-COPY_STATE = ".transcript.state.json"  # how far the source has been copied (dot file: bookkeeping, not data)
-COPY_STATE_VERSION = 1
-TAIL_BYTES = 4096                      # bytes before the offset that must be unchanged to trust it
 
 
 def _redacted(raw: bytes) -> str | None:
@@ -62,28 +64,12 @@ def _redacted(raw: bytes) -> str | None:
 
 
 def _copy_lines(fin, start: int, write) -> int:
-    """write() each complete line from `start`, redacted; return the offset just past the last one consumed.
-
-    A last line without a newline is taken only if it's whole JSON (a transcript line that's still being
-    written isn't), so a half-written line is left for the next run instead of being lost."""
-    fin.seek(start)
-    pos = start
-    for raw in fin:
-        if not raw.endswith(b"\n"):
-            try:
-                json.loads(raw)
-            except ValueError:
-                break
-        pos += len(raw)
+    """write() each complete line from `start`, redacted; return the offset just past the last one."""
+    def on_line(raw):
         r = _redacted(raw)
         if r:
             write(r)
-    return pos
-
-
-def _tail_hash(fin, offset: int) -> str:
-    fin.seek(max(0, offset - TAIL_BYTES))
-    return hashlib.sha256(fin.read(offset - max(0, offset - TAIL_BYTES))).hexdigest()
+    return read_complete_lines(fin, start, on_line)
 
 
 def copy_transcript(src: str, session_id: str, *, full: bool = False) -> str:
@@ -99,16 +85,13 @@ def copy_transcript(src: str, session_id: str, *, full: bool = False) -> str:
     source = os.path.abspath(src)
     with store._locked(d), open(src, "rb") as fin:  # Stop and SessionEnd can ingest a session concurrently
         st = store.read_json(state_path) or {}
-        size = os.fstat(fin.fileno()).st_size
-        offset = st.get("offset", 0)
-        append = (not full and st.get("version") == COPY_STATE_VERSION and st.get("source") == source
-                  and 0 < offset <= size and dst.is_file() and dst.stat().st_size == st.get("copy_size")
-                  and _tail_hash(fin, offset) == st.get("tail_hash"))
+        append = (not full and resumable(st, fin, source, COPY_STATE_VERSION)
+                  and dst.is_file() and dst.stat().st_size == st.get("copy_size"))
         if append:
-            if offset == size:
+            if st["offset"] == os.fstat(fin.fileno()).st_size:
                 return str(dst)  # nothing new since the last run
             out: list[str] = []
-            end = _copy_lines(fin, offset, out.append)
+            end = _copy_lines(fin, st["offset"], out.append)
             if out:
                 # a whole gzip member in one O_APPEND write. If it's torn, the copy's size no longer matches
                 # the state, so the next run rebuilds it.
@@ -133,8 +116,15 @@ def copy_transcript(src: str, session_id: str, *, full: bool = False) -> str:
                     pass
                 raise
         store.write_json_atomic(state_path, {"version": COPY_STATE_VERSION, "source": source, "offset": end,
-                                             "tail_hash": _tail_hash(fin, end), "copy_size": dst.stat().st_size})
+                                             "tail_hash": tail_hash(fin, end), "copy_size": dst.stat().st_size})
     return str(dst)
+
+
+def _parse_state(sid: str) -> dict | None:
+    try:
+        return store.read_json(store.session_dir(sid) / PARSE_STATE)
+    except ValueError:   # not a usable session id (e.g. an odd file name in --backfill)
+        return None
 
 
 def ingest(transcript_path: str, *, hook_event: str | None = None, end_reason: str | None = None,
@@ -142,7 +132,10 @@ def ingest(transcript_path: str, *, hook_event: str | None = None, end_reason: s
     transcript_path = os.path.expanduser(transcript_path)
     if not os.path.isfile(transcript_path):
         raise FileNotFoundError(transcript_path)
-    s = parse_transcript(transcript_path)
+    # The parse resumes from the last run's state (each state names its source and is checked against it);
+    # the file name is the session id when the hook doesn't pass one.
+    state = _parse_state(session_id or Path(transcript_path).stem)
+    s, new_state = parse_incremental(transcript_path, state)
     s.session_id = session_id or s.session_id or Path(transcript_path).stem
     if not s.requests and not s.steps:
         return None  # empty / metadata-only transcript
@@ -150,6 +143,8 @@ def ingest(transcript_path: str, *, hook_event: str | None = None, end_reason: s
     lam = redact_obj(last_assistant_message) if last_assistant_message else None
     store.upsert_session(s, transcript_path=transcript_path, hook_event=hook_event,
                          end_reason=end_reason, last_assistant_message=lam)
+    if new_state != state:   # unchanged when nothing was added since the last run
+        store.write_json_atomic(store.session_dir(s.session_id) / PARSE_STATE, new_state)
     return s.session_id
 
 
