@@ -79,11 +79,23 @@ def _save_state(**values) -> dict:
 
 # ---------------- check ----------------
 
+def changelog_section(text: str, version: str) -> str:
+    """The body of `## [version]` in a Keep a Changelog file, or ''."""
+    m = re.search(rf"^## \[?v?{re.escape(version)}\]?[^\n]*\n(.*?)(?=^## |^\[[^\]]+\]: |\Z)", text, re.M | re.S)
+    return m.group(1).strip() if m else ""
+
+
 def release_notes(repo: Path, tag: str) -> str:
-    """The annotated tag's message, else the subjects of the commits it adds (learned commits excluded)."""
-    msg = _git(repo, "tag", "-l", "--format=%(contents)", tag, check=False).stdout.strip()
-    if msg:
+    """The annotated tag's message, else the release's CHANGELOG.md section, else the subjects of the commits
+    it adds (learned commits excluded). A tag made on GitHub's release page has no message."""
+    annotated = _git(repo, "tag", "-l", "--format=%(objecttype)", tag, check=False).stdout.strip() == "tag"
+    msg = _git(repo, "tag", "-l", "--format=%(contents)", tag, check=False).stdout.strip() if annotated else ""
+    if msg:   # (for a lightweight tag, %(contents) would be the commit message)
         return msg[:2000]
+    log_text = _git(repo, "show", f"{tag}:CHANGELOG.md", check=False).stdout
+    section = changelog_section(log_text, tag.lstrip("v"))
+    if section:
+        return section[:2000]
     log = _git(repo, "log", "--no-merges", "--format=%s", f"HEAD..{tag}", check=False).stdout.splitlines()
     return "\n".join(f"- {s}" for s in log if not s.startswith("learned:"))[:2000]
 

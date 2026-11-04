@@ -59,6 +59,8 @@ You can also do it all by hand. Run these from `~/claude-learning-harness` (on W
 
 ## Updates
 
+What changed in each version: [CHANGELOG.md](CHANGELOG.md).
+
 Once a day the harness checks GitHub for a new release. When there is one, Claude tells you what changed and asks whether to update. Your learned items are kept. You can also update yourself:
 
 ```bash

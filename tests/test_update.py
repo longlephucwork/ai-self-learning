@@ -65,6 +65,17 @@ class Update(unittest.TestCase):
         self.assertIn("Faster detection", st["notes"])
         self.assertEqual((self.user / "VERSION").read_text().strip(), "1.0.0")     # check changes nothing
 
+    def test_lightweight_tag_uses_the_changelog(self):
+        """A tag made on GitHub's release page has no message: the CHANGELOG.md section is shown instead."""
+        changelog = ("# Changelog\n\n## [Unreleased]\n\n## [1.1.0] - 2026-11-04\n\n### Added\n- learns while you work\n\n"
+                     "## [1.0.0] - 2026-11-03\n\n- first\n\n[1.1.0]: https://x/compare/v1.0.0...v1.1.0\n")
+        self.release("1.1.0", {"CHANGELOG.md": changelog}, notes=None)
+        notes = self.u.check(self.user)["notes"]
+        self.assertIn("learns while you work", notes)
+        self.assertNotIn("first", notes)
+        self.assertNotIn("https://x", notes)
+        self.assertEqual(self.u.changelog_section(changelog, "9.9.9"), "")
+
     def test_only_semver_tags_on_main_count(self):
         git(self.dev, "tag", "v2"); git(self.dev, "tag", "release-3"); git(self.dev, "push", "-q", "--tags")
         git(self.dev, "checkout", "-q", "-b", "side")

@@ -279,11 +279,12 @@ A **release** is an annotated git tag `vMAJOR.MINOR.PATCH` on `main`. The `VERSI
 A fresh install starts at the newest release, not at whatever is on `main` (or on `main` if there are no releases yet). For a fork, set `LEARNING_HARNESS_REPO_URL` before running the installer.
 
 **Publishing a release** (maintainers):
-```bash
-echo "1.1.0" > VERSION && git commit -am "Release 1.1.0"
-git tag -a v1.1.0 -m "What changed, in a few lines (shown to users)"
-git push origin main v1.1.0
-```
+1. Move the `## [Unreleased]` notes in `CHANGELOG.md` under a new `## [X.Y.Z] - date` heading, and put the version in `VERSION`. Commit and push to `main`.
+2. Tag it, either on GitHub (**Releases → Draft a new release**, tag `vX.Y.Z` on `main`, label *None*) or with git:
+   ```bash
+   git tag -a v1.1.0 -m "What changed, in a few lines" && git push origin v1.1.0
+   ```
+Claude shows users the tag's message as the release notes. A tag made on GitHub has no message, so Claude shows that version's `CHANGELOG.md` section instead.
 
 ## Quick learn (`refine/learn.py`)
 
