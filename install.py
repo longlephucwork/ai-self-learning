@@ -323,7 +323,9 @@ def rc_file() -> Path:
 
 def bin_dir_path() -> Path:
     """Wrappers for installed scripts live in learned/bin (learned/ is the local, never-pushed repo)."""
-    return REPO / "learned" / "bin"
+    sys.path.insert(0, str(REPO))
+    from harness_lib import store
+    return store.learned_dir() / "bin"
 
 
 def rc_block(rc: Path) -> str:
@@ -602,7 +604,7 @@ def simple_install(a, ui: UI) -> int:
     if not a.no_hooks:
         plan.append("log your Claude Code sessions (on this machine only, in store/)")
     if not a.no_auto and not (a.no_hooks and not hooks_installed()):
-        plan.append(f"learn in the background: at most once a day, up to ${budget:.0f}/month; "
+        plan.append(f"learn in the background: every few hours, up to ${budget:.0f}/month; "
                     "nothing installs without your OK")
     if not a.no_learn_skill:
         plan.append('let you say "learn this" in any session')
@@ -738,7 +740,7 @@ def main(argv=None) -> int:
     elif a.no_hooks and not hooks_installed():
         say("  skipped (needs the session-logging hooks)")
     elif ui.ask(f"Learn automatically? After sessions end it rates them, finds repeated tasks and drafts\n"
-                f"  scripts/skills in the background: at most once a day, drafts only (you still approve),\n"
+                f"  scripts/skills in the background: every few hours, drafts only (you still approve),\n"
                 f"  budget ${budget:.2f}/month. Claude tells you when a draft is ready."):
         setup_auto(enable=True, budget=budget)
     else:

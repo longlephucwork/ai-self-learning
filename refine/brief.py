@@ -30,9 +30,10 @@ MAX_EVAL_SESSIONS = 3
 MAX_EXCERPT = 2500
 
 
-def briefs_dir() -> Path:
+def briefs_dir(create: bool = True) -> Path:
     d = store.learned_dir() / "briefs"
-    d.mkdir(parents=True, exist_ok=True)
+    if create:
+        d.mkdir(parents=True, exist_ok=True)
     return d
 
 

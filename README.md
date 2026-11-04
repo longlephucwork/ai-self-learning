@@ -25,7 +25,7 @@ Use Claude Code as usual. In the background, the harness:
 3. spots tasks you've done 3+ times
 4. drafts and checks an artifact for each one
 
-At most once a day, within $5/month. When a draft is ready, Claude mentions it at the start of your next session. Say yes to see it, then yes again to install it.
+Every few hours, within $5/month. When a draft is ready, Claude mentions it at the start of your next session. When it can't tell whether a repeated task went well, Claude asks you instead of guessing. Say yes to see it, then yes again to install it.
 
 **Learn right away:** say **"learn this"** in any session to learn from that one session. Claude asks before installing anything.
 

@@ -246,7 +246,8 @@ With automatic learning on (the installer asks; or `store/config.json` → `"aut
 |---|---|---|
 | `enabled` | `false` (the installer offers `true`) | on/off |
 | `monthly_budget_usd` | `5.0` | background runs stop when this month's spend reaches it |
-| `min_hours_between_runs` | `24` | throttle |
+| `min_hours_between_runs` | `6` | throttle |
+| `keep_days` | `90` | finished one-off sessions older than this, evidence for nothing, are deleted |
 | `min_new_sessions` | `3` | finished sessions needed since the last run |
 | `max_drafts_per_run` | `1` | caps drafting cost per run |
 | `retry_days` | `7` | wait before re-drafting a candidate that failed |
@@ -351,3 +352,18 @@ Updating an installed skill works the same way: `refine.py revise <skill>` write
 | script | listed at the start of every session by the `SessionStart` hook, with its description and the absolute command to run it, so it works even if Claude Code didn't inherit the PATH change |
 
 This is for Claude Code only; the Claude desktop and web apps don't read `~/.claude/skills` or these hooks.
+
+## Asking instead of guessing (`refine.py confirm`)
+
+Inferred ratings are guesses. A one-off task that ends without any reaction from you often comes out `unknown`, and `unknown` sessions don't count. So a task you've done several times can stay just below the threshold for good. The harness spots these **near misses**: tasks done at least `min_success` times that would qualify if the unclear outcomes were good. They're computed from local files, with no model call.
+
+1. At the start of your next session, Claude asks you once, briefly, whether those sessions went well.
+2. Claude records your answer with `refine.py confirm <pattern> --accepted <ids> [--redone <ids>]`. These count as your own ratings, so they override the guesses.
+3. If the task now qualifies, it's learned on the spot: a skill brief for skill-creator, or a validated draft for a script or tool. Claude offers to continue right away, and still installs nothing without your yes.
+
+Claude asks once per set of unclear sessions. If you ignore it, it isn't repeated until new sessions of that task appear.
+
+## Forgetting one-offs
+
+- **A task done once isn't a pattern.** Grouping writes no pattern for a one-session group, and removes old ones. The session's summary is kept, so a later repeat is grouped with it. Exceptions: quick-learned patterns, locked ones (briefed, proposed, installed and so on), and `"min_success": 1`.
+- **Old one-offs are deleted.** Each background run deletes finished sessions older than `keep_days` (90) that aren't evidence for anything: not in any pattern or brief, and not evidence for an installed item. `refine.py prune --dry-run` shows what would go, and `refine.py prune --days N` runs it by hand.

@@ -113,7 +113,10 @@ class Installer(unittest.TestCase):
             install.edit_rc(rc, install.rc_block(rc))
         text = rc.read_text()
         self.assertEqual(text.count(install.MARK_BEGIN), 1)
-        self.assertIn(f'export PATH="{(ROOT / "learned" / "bin").as_posix()}:$PATH"', text)
+        self.assertIn(f'export PATH="{install.bin_dir_path().as_posix()}:$PATH"', text)
+        with mock.patch.dict(os.environ):
+            os.environ.pop("LEARNING_HARNESS_INSTALL_ROOT", None)   # the real default
+            self.assertEqual(install.bin_dir_path(), ROOT / "learned" / "bin")
         self.assertIn("alias ll='ls -l'", text)
         install.edit_rc(rc, None)
         self.assertEqual(rc.read_text(), "alias ll='ls -l'\n")
@@ -236,7 +239,9 @@ class Installer(unittest.TestCase):
         """learned/ is its own git repo (created on first use) and the code repo ignores it."""
         import subprocess, tempfile
         from harness_lib import store
-        self.assertEqual(store.learned_dir(), ROOT / "learned")
+        with mock.patch.dict(os.environ):
+            os.environ.pop("LEARNING_HARNESS_INSTALL_ROOT", None)   # check the real default
+            self.assertEqual(store.learned_dir(), ROOT / "learned")
         ignored = subprocess.run(["git", "-C", str(ROOT), "check-ignore", "-q", "learned/registry.json"])
         self.assertEqual(ignored.returncode, 0, "learned/ must be git-ignored by the code repo")
         tracked = subprocess.run(["git", "-C", str(ROOT), "ls-files", "patterns", "generated", "registry.json",

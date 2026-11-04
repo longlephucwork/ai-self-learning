@@ -147,8 +147,14 @@ def apply_clusters(clusters: list[dict], summaries: list[dict], *, method: str,
     existing = {r["key"]: r for r in store.iter_patterns()}
     ts = store.now()
     results = []
+    # A task done once isn't a pattern: one-session groups get no pattern file (the summary is kept, so a
+    # later repeat is grouped with it). Exceptions: locked or quick-learned patterns, and min_success == 1.
+    min_keep = 1 if min_success <= 1 else 2
     for c in clusters:
         members = [by_id[i] for i in c["session_ids"]]
+        prev = existing.get(c["key"]) or {}
+        if len(members) < min_keep and prev.get("status") not in LOCKED_STATUSES and not prev.get("quick"):
+            continue
         clean = [m for m in members if not m["injection"]]
         excluded = [m["session_id"] for m in members if m["injection"]]
         n_success = sum(m["outcome"] in success_outcomes for m in clean)
@@ -183,6 +189,6 @@ def apply_clusters(clusters: list[dict], summaries: list[dict], *, method: str,
         results.append(rec)
     # Patterns that vanished: drop unlocked ones; keep locked ones (their decision history matters).
     for key, old in existing.items():
-        if old.get("status") not in LOCKED_STATUSES:
+        if old.get("status") not in LOCKED_STATUSES and not old.get("quick"):
             store.delete_pattern(key)
     return sorted(results, key=lambda r: (-r["n_success"], r["key"]))

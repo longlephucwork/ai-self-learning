@@ -12,9 +12,10 @@ One run:
      mechanical inputs become tools (refine/memory.py)
 
 Settings, in store/config.json under "auto" (defaults shown):
-  enabled: false   monthly_budget_usd: 5.0   min_hours_between_runs: 24   min_new_sessions: 3
+  enabled: false   monthly_budget_usd: 5.0   min_hours_between_runs: 6   min_new_sessions: 3
   max_drafts_per_run: 1   retry_days: 7   min_confidence: 0.6
   min_success: 3   (successful sessions before a task is learned; 1 = learn every task after one success)
+  keep_days: 90    (finished one-off sessions older than this, evidence for nothing, are deleted)
   promote_min_uses: 5   promote_min_accuracy: 0.9   promote_min_mechanical: 0.75
 Every model call's cost goes to store/spend.jsonl. Background runs stop when the month's spend reaches
 the budget, and each call's own limit is capped at what remains.
@@ -33,7 +34,8 @@ from harness_lib import store
 from harness_lib.claude_cli import DEFAULT_MODEL, ClaudeError, budget_remaining, month_spend, run_structured
 from harness_lib.schema_check import validate
 
-DEFAULTS = {"enabled": False, "monthly_budget_usd": 5.0, "min_hours_between_runs": 24, "min_new_sessions": 3,
+DEFAULTS = {"enabled": False, "monthly_budget_usd": 5.0, "min_hours_between_runs": 6, "min_new_sessions": 3,
+            "keep_days": 90,
             "max_drafts_per_run": 1, "retry_days": 7, "min_confidence": 0.6, "min_success": 3,
             "promote_min_uses": 5, "promote_min_accuracy": 0.9, "promote_min_mechanical": 0.75}
 LOCK_STALE_S = 2 * 3600
@@ -43,17 +45,30 @@ _children: list = []   # keep spawned runs referenced, so their handles aren't c
 
 # ---------------- config / state ----------------
 
+# Defaults that changed: a stored value equal to the OLD default was written by an older installer (which
+# saved every default), not chosen by the user, so the new default applies.
+OLD_DEFAULTS = {"min_hours_between_runs": 24}
+
+
+def _stored() -> dict:
+    cfg = dict((store.read_json(store.store_dir() / "config.json") or {}).get("auto", {}))
+    for k, v in OLD_DEFAULTS.items():
+        if cfg.get(k) == v:
+            cfg.pop(k)
+    return cfg
+
+
 def config() -> dict:
-    cfg = (store.read_json(store.store_dir() / "config.json") or {}).get("auto", {})
-    return {**DEFAULTS, **cfg}
+    return {**DEFAULTS, **_stored()}
 
 
 def set_config(**values) -> dict:
+    """Save only the settings actually chosen, so improved defaults reach existing installs."""
     path = store.store_dir() / "config.json"
     cfg = store.read_json(path) or {}
-    cfg["auto"] = {**DEFAULTS, **cfg.get("auto", {}), **values}
+    cfg["auto"] = {**_stored(), **values}
     store.write_json_atomic(path, cfg)
-    return cfg["auto"]
+    return config()
 
 
 def state() -> dict:
@@ -168,8 +183,9 @@ outcome:
 - edited: the user had to correct or adjust the result (asked for changes, fixed it themselves), but kept it
 - redone: the result was rejected, abandoned, or had to be done again a different way
 - unknown: not enough evidence (no real task, the session was cut off, or you can't tell)
-confidence: 0..1, how sure you are. A single request that was completed with no user reaction is
-"accepted" with moderate confidence (about 0.6-0.7), never higher.
+confidence: 0..1, how sure you are. A task that was completed and the user didn't push back on is
+"accepted" with moderate confidence (about 0.65), never higher, even in a long session with follow-up
+questions. Use "unknown" only when you really can't tell whether the task got done.
 note: for "edited" or "redone", what the user wanted changed, in their words where possible; else ""."""
 
 
@@ -232,6 +248,121 @@ def candidates_to_draft(retry_days: int) -> list[dict]:
     return sorted(out, key=lambda p: (-p.get("n_success", 0), p["key"]))
 
 
+# ---------------- forgetting one-offs ----------------
+
+def protected_sessions() -> set[str]:
+    """Sessions that are evidence for something: pattern members, briefs, installed items."""
+    keep = set()
+    for p in store.iter_patterns():
+        keep |= set(p.get("session_ids", []))
+    from refine.brief import briefs_dir
+    for b in briefs_dir(create=False).glob("*/brief.json"):
+        keep |= set((store.read_json(b) or {}).get("sessions", []))
+    from registry import install as reg
+    for e in reg.load_registry()["installed"].values():
+        keep |= set((e.get("evidence") or {}).get("sessions", []))
+    return keep
+
+
+def prune_sessions(keep_days: int, *, dry_run: bool = False, now: datetime | None = None) -> list[str]:
+    """Delete finished sessions older than keep_days that aren't evidence for anything (one-offs)."""
+    import shutil
+    now = now or datetime.now(timezone.utc)
+    keep = protected_sessions()
+    gone = []
+    for r in store.iter_sessions():
+        end = _ts(r.get("ended_at")) if r.get("ended_at") else None
+        if not end or r["session_id"] in keep or now - end < timedelta(days=keep_days):
+            continue
+        gone.append(r["session_id"])
+        if not dry_run:
+            shutil.rmtree(store.session_dir(r["session_id"]), ignore_errors=True)
+    return gone
+
+
+# ---------------- near misses: ask the user instead of guessing ----------------
+
+def recount(pattern: dict) -> dict:
+    members = [s for s in pattern.get("session_ids", []) if s not in pattern.get("excluded_injection", [])]
+    ok = pattern.get("success_outcomes", ["accepted", "edited"])
+    outcomes = {s: store.outcome(s)["outcome"] for s in members}
+    return {"members": members, "success": [s for s in members if outcomes[s] in ok],
+            "unknown": [s for s in members if outcomes[s] == "unknown"]}
+
+
+def near_misses(min_success: int | None = None) -> list[dict]:
+    """Tasks done often enough that would become learnable if the user confirmed the unclear outcomes."""
+    min_success = int(min_success or config()["min_success"])
+    out = []
+    for p in store.iter_patterns():
+        if p.get("status") != "forming":
+            continue
+        c = recount(p)
+        need = min_success - len(c["success"])
+        if need > 0 and len(c["members"]) >= min_success and len(c["unknown"]) >= need:
+            out.append({"pattern": p["key"], "label": p.get("label") or p["key"], "description": p.get("description", ""),
+                        "n_sessions": len(c["members"]), "n_success": len(c["success"]), "need": need,
+                        "unknown": c["unknown"]})
+    return out
+
+
+def confirm(pattern_key: str, accepted: list[str] = (), redone: list[str] = (), edited: dict | None = None,
+            log=print) -> dict:
+    """Record what the user said about unclear sessions, then learn the task right away if it now qualifies."""
+    pattern = store.load_pattern(pattern_key)
+    if not pattern:
+        raise LookupError(f"no pattern {pattern_key!r}")
+    for sid in accepted:
+        store.rate(store.resolve_session(sid), "accepted", "confirmed by the user in chat")
+    for sid in redone:
+        store.rate(store.resolve_session(sid), "redone", "the user said it didn't work out")
+    for sid, note in (edited or {}).items():
+        store.rate(store.resolve_session(sid), "edited", note)
+    c = recount(pattern)
+    min_success = int(pattern.get("min_success") or config()["min_success"])
+    pattern["n_success"] = len(c["success"])
+    result = {"pattern": pattern_key, "n_success": len(c["success"]), "needed": min_success}
+    if len(c["success"]) < min_success:
+        store.save_pattern(pattern)
+        result["status"] = "forming"
+        return result
+    pattern["status"] = "candidate"
+    store.save_pattern(pattern)
+    if pattern.get("suggested_type") == "skill":
+        from refine.brief import write_brief
+        b = write_brief(pattern_key)
+        result.update(status="briefed", brief=b["brief"], brief_path=b["path"])
+    else:
+        from generate.propose import propose
+        r = propose(pattern_key, log=log)
+        result.update(status="proposed" if r["passed"] else "candidate", draft=r["draft"], passed=r["passed"],
+                      problems=r["problems"][:5])
+    return result
+
+
+def confirm_context(items: list[dict]) -> list[str]:
+    py = Path(sys.executable).resolve().as_posix()
+    tool = (store.REPO_ROOT / "refine" / "refine.py").as_posix()
+    lines = ["[learning-harness] The user has repeated some tasks, but whether those sessions worked out is unclear "
+             "from the logs. Rather than guess, ask the user once, briefly, at a natural point early in this "
+             "conversation (don't derail an urgent request):"]
+    for it in items:
+        sess = []
+        for sid in it["unknown"][:6]:
+            rec = store.load_session(sid) or {}
+            sess.append(f"{sid[:8]} ({(rec.get('started_at') or '')[:10]}: {(rec.get('first_request') or '')[:60]!r})")
+        lines.append(f"- '{it['label']}' ({it['description'][:120]}): done {it['n_sessions']} times, "
+                     f"{it['n_success']} known to have worked; unclear: {', '.join(sess)}")
+    lines += [f"Ask whether those went well. Then record the answer: {py} {tool} confirm <pattern> "
+              f"--accepted <ids the user confirms> [--redone <ids that went wrong>] "
+              f"(pattern keys: {', '.join(i['pattern'] for i in items)}).",
+              "If it prints SKILL BRIEF, offer to build the skill with skill-creator right away (BRIEF.md is the "
+              "captured intent; it says where to write the skill and to run `review/cli.py adopt <name>` after). If "
+              "it prints a validated draft, offer to show it. Install nothing without the user's explicit yes. If the "
+              "user doesn't want to answer, drop it."]
+    return lines
+
+
 # ---------------- one run ----------------
 
 def run(*, force: bool = False) -> dict:
@@ -248,6 +379,9 @@ def run(*, force: bool = False) -> dict:
     result = {"ran": True, "started_at": started}
     try:
         log(f"auto run started ({why if ok else 'forced'}); budget left ${budget_remaining():.2f}")
+        pruned = prune_sessions(int(cfg["keep_days"]))
+        if pruned:
+            log(f"  forgot {len(pruned)} one-off session(s) older than {cfg['keep_days']} days")
         result["ratings"] = infer_ratings(sessions_to_rate(), min_confidence=cfg["min_confidence"])
 
         from detect import cluster as cl
@@ -307,6 +441,13 @@ def run(*, force: bool = False) -> dict:
                 log(f"  promoting {e['name']} failed: {str(ex)[:150]}")
             left -= 1
         result["drafted"] = drafted
+        nm = near_misses(cfg["min_success"])
+        result["near_misses"] = [n["pattern"] for n in nm]
+        log(f"  summary: {len(result.get('candidates', []))} candidate(s), {len(briefs)} skill brief(s), "
+            f"{len([d for d in drafted if d.get('passed')])} validated draft(s); "
+            + (f"{len(nm)} task(s) waiting for you to confirm unclear outcomes: "
+               + ", ".join(f"{n['label']} ({n['n_success']}/{n['n_sessions']} known good)" for n in nm)
+               if nm else "nothing waiting on unclear outcomes"))
     except Exception as e:  # a background run must never leave the lock behind
         import traceback
         result["error"] = repr(e)[:300]
@@ -350,7 +491,7 @@ def inbox() -> list[dict]:
     """Validated drafts waiting for a decision."""
     from validate import replay
     out = []
-    root = replay.drafts_dir()
+    root = replay.drafts_dir(create=False)   # status checks must not create folders
     for d in sorted(root.iterdir()) if root.exists() else []:
         m = store.read_json(d / "proposal.json") if d.is_dir() else None
         if not m or m.get("status") != "validated":
@@ -401,10 +542,13 @@ def session_start_context() -> str | None:
     fresh_briefs = [b for b in waiting() if seen.get("brief:" + b["name"]) != b.get("id", b["created_at"])]
     for b in fresh_briefs:
         seen["brief:" + b["name"]] = b.get("id", b["created_at"])
+    to_confirm = [n for n in near_misses() if seen.get("confirm:" + n["pattern"]) != ",".join(sorted(n["unknown"]))]
+    for n in to_confirm:
+        seen["confirm:" + n["pattern"]] = ",".join(sorted(n["unknown"]))
     if not fresh:
-        if fresh_briefs:
+        if fresh_briefs or to_confirm:
             store.write_json_atomic(seen_path, seen)
-            return "\n".join(brief_context(fresh_briefs))
+            return "\n".join(brief_context(fresh_briefs) + (confirm_context(to_confirm) if to_confirm else []))
         return None
     for i in fresh:
         seen[i["draft"]] = i["fingerprint"]
@@ -427,4 +571,6 @@ def session_start_context() -> str | None:
               f"If they decline: {py} {cli} reject {d} --reason \"<their reason>\"",
               "Never approve without the user's explicit yes, and don't bring it up again if they ignore it."]
     lines += brief_context(fresh_briefs)
+    if to_confirm:
+        lines += confirm_context(to_confirm)
     return "\n".join(lines)

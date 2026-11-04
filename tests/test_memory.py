@@ -116,7 +116,7 @@ class Memory(p4.Phase4):
         summ = [{"session_id": "s-fruit", "task_family": "csv", "deterministic": True, "injection": False,
                  "outcome": "accepted", "intent": "", "inputs": [], "outputs": []}]
         rows = cl.apply_clusters(cl.group_by_family(summ), summ, method="family")
-        self.assertEqual(rows[0]["status"], "forming")          # default: 3 successes
+        self.assertEqual(rows, [])                              # default: a one-off isn't even a pattern
         auto.set_config(min_success=1)
         rows = cl.apply_clusters(cl.group_by_family(summ), summ, method="family",
                                  min_success=int(auto.config()["min_success"]))

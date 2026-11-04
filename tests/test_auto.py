@@ -23,6 +23,7 @@ class Auto(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         t = self.t = Path(self.tmp.name)
         os.environ.update(LEARNING_HARNESS_STORE=str(t / "store"), LEARNING_HARNESS_PATTERNS=str(t / "patterns"),
+                          LEARNING_HARNESS_INSTALL_ROOT=str(t / "learned"),
                           LEARNING_HARNESS_GENERATED=str(t / "generated"),
                           LEARNING_HARNESS_CLAUDE_CMD=json.dumps([sys.executable, str(ROOT / "tests" / "fake_claude.py")]),
                           FAKE_CLAUDE_LOG=str(t / "calls.jsonl"), FAKE_RATE_RULES=json.dumps(RULES))
@@ -114,7 +115,7 @@ class Auto(unittest.TestCase):
         self.auto._release()
         recent = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
         self.store.write_json_atomic(self.store.store_dir() / "auto_state.json", {"last_run_at": recent})
-        self.assertIn("waiting 24h", self.auto.should_run()[1])
+        self.assertIn("waiting 6h", self.auto.should_run()[1])
         self.auto.set_config(monthly_budget_usd=0.0)
         self.assertIn("budget", self.auto.should_run()[1])
 
@@ -148,6 +149,75 @@ class Auto(unittest.TestCase):
         with mock.patch.object(Path, "read_text", flaky), mock.patch.object(store.os, "name", "nt"):
             self.assertEqual(store.read_json(p), {"a": 1})
         self.assertEqual(len(n), 3)
+
+    def near_miss_setup(self, skill=True):
+        """3 deploy-like sessions: one known good, two with unclear outcomes."""
+        self.add_sessions()
+        self.store.rate("s-fruit", "accepted")
+        for sid in ("s-price", "s-kv"):
+            self.store.rate(sid, "unknown", source="inferred", confidence=0.55)
+        self.store.save_pattern({"key": "deploy-service", "label": "deploy service", "description": "Deploy a service",
+                                 "status": "forming", "n_sessions": 3, "n_success": 1, "min_success": 3,
+                                 "success_outcomes": ["accepted", "edited"], "deterministic_frac": 0.0,
+                                 "suggested_type": "skill" if skill else "script", "type_rationale": "",
+                                 "session_ids": sorted(SESSIONS), "excluded_injection": []})
+
+    def test_near_miss_asks_the_user_once(self):
+        self.near_miss_setup()
+        nm = self.auto.near_misses()
+        self.assertEqual([(n["pattern"], n["n_success"], n["need"]) for n in nm], [("deploy-service", 1, 2)])
+        text = self.auto.session_start_context()
+        self.assertIn("ask the user once", text)
+        self.assertIn("'deploy service'", text)
+        self.assertIn("confirm <pattern> --accepted", text)
+        self.assertIn("s-price", text)
+        self.assertIsNone(self.auto.session_start_context())                     # asked once
+        self.store.rate("s-price", "unknown", source="inferred")                 # same unclear set: still quiet
+        self.assertIsNone(self.auto.session_start_context())
+
+    def test_confirm_learns_right_away(self):
+        self.near_miss_setup()
+        r = self.auto.confirm("deploy-service", accepted=["s-price"])
+        self.assertEqual((r["status"], r["n_success"]), ("forming", 2))         # one confirmation isn't enough
+        r = self.auto.confirm("deploy-service", accepted=["s-kv"])
+        self.assertEqual(r["status"], "briefed")
+        self.assertTrue((Path(r["brief_path"]) / "BRIEF.md").exists())
+        self.assertEqual(self.store.outcome("s-kv")["source"], "manual")
+        self.assertEqual(self.auto.near_misses(), [])
+        text = self.auto.session_start_context()                                 # Claude now offers skill-creator
+        self.assertIn("deploy-service", text)
+
+    def test_confirm_redone_stops_asking(self):
+        self.near_miss_setup()
+        r = self.auto.confirm("deploy-service", redone=["s-price", "s-kv"])
+        self.assertEqual(r["status"], "forming")
+        self.assertEqual(self.auto.near_misses(), [])                            # nothing unclear left
+
+    def test_old_injection_flags_are_rechecked(self):
+        from detect import summarize as sm
+        self.add_sessions(["s-fruit", "s-price"])
+        for sid, flagged in (("s-fruit", True), ("s-price", False)):
+            rec = self.store.load_session(sid)
+            self.store.save_summary(sid, {"session_id": sid, "task_family": "x", "model": "m", "cost_usd": 0,
+                                          "summary": {"injection_suspected": flagged}, "created_at": self.store.now(),
+                                          "source_content_hash": rec["content_hash"]})   # an old (v1) summary
+        sids, _ = sm.pending_sessions()
+        self.assertEqual(sids, ["s-fruit"])                                      # only the flagged one is redone
+        self.assertIn("pasted_content", sm.SYSTEM)
+        self.assertIn("never an injection", sm.SYSTEM)
+
+    def test_old_one_offs_are_forgotten_but_evidence_is_kept(self):
+        self.add_sessions()
+        self.store.save_pattern({"key": "csv", "label": "csv", "description": "", "status": "forming", "n_sessions": 2,
+                                 "n_success": 2, "deterministic_frac": 1.0, "suggested_type": "script",
+                                 "type_rationale": "", "session_ids": ["s-fruit", "s-price"]})
+        later = datetime.now(timezone.utc) + timedelta(days=91)
+        self.assertEqual(self.auto.prune_sessions(90, dry_run=True, now=later), ["s-kv"])  # the only one-off
+        self.assertIsNotNone(self.store.load_session("s-kv"))                  # dry run deletes nothing
+        self.assertEqual(self.auto.prune_sessions(90), [])                      # not old enough yet
+        self.auto.prune_sessions(90, now=later)
+        self.assertIsNone(self.store.load_session("s-kv"))
+        self.assertIsNotNone(self.store.load_session("s-fruit"))                # pattern evidence stays
 
     def test_stale_lock_is_replaced(self):
         self.store.store_dir()

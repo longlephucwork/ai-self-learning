@@ -565,9 +565,10 @@ def load_draft(name: str) -> tuple[dict, dict[str, str], Path]:
     return proposal, files, d
 
 
-def drafts_dir() -> Path:
+def drafts_dir(create: bool = True) -> Path:
     p = Path(os.environ.get("LEARNING_HARNESS_GENERATED", store.learned_dir() / "generated"))
-    p.mkdir(parents=True, exist_ok=True)
+    if create:
+        p.mkdir(parents=True, exist_ok=True)
     return p
 
 

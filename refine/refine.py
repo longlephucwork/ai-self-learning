@@ -7,8 +7,11 @@
   refine.py revise <name> [--model M]          draft v(N+1) from the failures (normal review/approve applies)
   refine.py expose <script> [--model M]        draft an MCP tool that wraps an installed script (no new code)
   refine.py learn [session]                    quick learn: draft from ONE session now (default: this/last session)
+  refine.py confirm <pattern> --accepted ID... [--redone ID...]   record what the user said about unclear
+                                               sessions; learns the task right away if it now qualifies
   refine.py promote <skill>                    turn a well-practised skill into a tool (muscle memory)
   refine.py demote <tool>                      bring back the skill a promoted tool replaced
+  refine.py prune [--days N] [--dry-run]       delete old one-off sessions that are evidence for nothing
   refine.py auto [--force]                     one automatic-learning run (normally started by the SessionEnd hook)
   refine.py auto-status                        settings, budget, last run, drafts waiting
   refine.py cycle [--generate N] [--no-detect] one maintenance pass: detect -> draft new candidates -> report
@@ -262,7 +265,10 @@ def main(argv=None):
     p.add_argument("--max-attempts", type=int, default=2)
     p = sub.add_parser("learn"); p.add_argument("session", nargs="?", help="session id or prefix (default: this one)")
     p.add_argument("--model")
+    p = sub.add_parser("prune"); p.add_argument("--days", type=int); p.add_argument("--dry-run", action="store_true")
     p = sub.add_parser("brief"); p.add_argument("pattern", help="pattern key to brief for skill-creator")
+    p = sub.add_parser("confirm"); p.add_argument("pattern")
+    p.add_argument("--accepted", nargs="*", default=[]); p.add_argument("--redone", nargs="*", default=[])
     p = sub.add_parser("promote"); p.add_argument("name"); p.add_argument("--model")
     p = sub.add_parser("demote"); p.add_argument("name"); p.add_argument("--yes", action="store_true")
     p = sub.add_parser("auto"); p.add_argument("--force", action="store_true", help="ignore the throttle")
@@ -345,6 +351,30 @@ def main(argv=None):
             for p in r["problems"][:8]:
                 print("  -", p)
         return 0 if r["passed"] else 1
+    elif a.cmd == "prune":
+        from refine import auto
+        days = a.days if a.days is not None else int(auto.config()["keep_days"])
+        gone = auto.prune_sessions(days, dry_run=a.dry_run)
+        print(f"{'would delete' if a.dry_run else 'deleted'} {len(gone)} one-off session(s) older than {days} days"
+              + (": " + ", ".join(s[:8] for s in gone[:20]) if gone else ""))
+        return 0
+    elif a.cmd == "confirm":
+        from harness_lib.claude_cli import ClaudeError
+        from refine import auto
+        try:
+            r = auto.confirm(a.pattern, accepted=a.accepted, redone=a.redone)
+        except (LookupError, ValueError, ClaudeError) as e:
+            sys.exit(f"error: {e}")
+        if r["status"] == "forming":
+            print(f"recorded; {r['n_success']} of {r['needed']} successful sessions so far")
+        elif r.get("brief"):
+            print(f"SKILL BRIEF: {r['brief_path']}/BRIEF.md\nbuild it with skill-creator, then run: "
+                  f"python3 review/cli.py adopt {r['brief']}")
+        else:
+            print(f"{'VALIDATED' if r.get('passed') else 'NOT VALIDATED'} draft: {r.get('draft')}")
+            for p in r.get("problems") or []:
+                print("  -", p)
+        return 0
     elif a.cmd == "brief":
         from refine.brief import write_brief
         try:
