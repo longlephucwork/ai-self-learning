@@ -6,6 +6,8 @@ What changed in each version of the learning harness. The format follows
 
 ## [Unreleased]
 
+## [0.0.3] - 2026-11-04
+
 ### Added
 - **Muscle memory can make scripts.** `refine.py promote <skill> --as script` turns a well-practised skill into a script instead of an MCP tool. The script's tests are the real inputs and outputs of the skill's uses, as for a tool, and approving it retires the skill.
 - New setting `"promote_as"` under `"auto"` in `store/config.json`: `"tool"` (the default) or `"script"`. It decides what the background run, and `promote` without `--as`, turns a skill into.
@@ -60,6 +62,7 @@ What changed in each version of the learning harness. The format follows
 - Automatic learning in the background, within a monthly budget.
 - Self-update from tagged releases: a daily check, Claude asks first, a safe merge, and rollback.
 
-[Unreleased]: https://github.com/longlephucwork/claude-learning-harness/compare/v0.0.2...HEAD
+[Unreleased]: https://github.com/longlephucwork/claude-learning-harness/compare/v0.0.3...HEAD
+[0.0.3]: https://github.com/longlephucwork/claude-learning-harness/compare/v0.0.2...v0.0.3
 [0.0.2]: https://github.com/longlephucwork/claude-learning-harness/compare/v0.0.1...v0.0.2
 [0.0.1]: https://github.com/longlephucwork/claude-learning-harness/releases/tag/v0.0.1
