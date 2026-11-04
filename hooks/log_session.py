@@ -60,7 +60,7 @@ def copy_transcript(src: str, session_id: str) -> str:
             except json.JSONDecodeError:
                 continue
             fout.write(json.dumps(redact_obj(_strip(obj)), ensure_ascii=False) + "\n")
-    os.replace(tmp, dst)
+    store._replace(tmp, dst)  # retried on Windows while another process has the file open
     return str(dst)
 
 

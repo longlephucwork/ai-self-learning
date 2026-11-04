@@ -143,6 +143,18 @@ class Phase1(unittest.TestCase):
             if len(calls) < 3:
                 raise PermissionError("in use")
             real(src, dst)
+        # the hook's transcript copy goes through the same retry (it used to call os.replace directly)
+        calls.clear()
+
+        class WindowsOs:  # what the store sees; pathlib keeps the real os module
+            name, replace = "nt", staticmethod(flaky)
+
+            def __getattr__(self, attr):
+                return getattr(os, attr)
+        with mock.patch.object(store, "os", WindowsOs()):
+            log_session.copy_transcript(str(FIX), "test-sess-1")
+        self.assertEqual(len(calls), 3)
+        calls.clear()
         target = Path(self.tmp.name) / "x.json"   # build paths before faking os.name (pathlib checks it)
         with mock.patch.object(store.os, "replace", flaky), mock.patch.object(store.os, "name", "nt"):
             store.write_json_atomic(target, {"a": 1})

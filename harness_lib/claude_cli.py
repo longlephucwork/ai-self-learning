@@ -68,7 +68,8 @@ def resolve_claude() -> list[str]:
 def _node_command_from_shim(shim: str) -> list[str] | None:
     import re
     try:
-        text = open(shim, encoding="utf-8", errors="replace").read()
+        with open(shim, encoding="utf-8", errors="replace") as fh:
+            text = fh.read()
     except OSError:
         return None
     m = re.search(r'"(%~?dp0%?[^"]*?\.(?:c?js|mjs))"', text, re.I)

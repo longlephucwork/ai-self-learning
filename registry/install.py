@@ -240,7 +240,7 @@ def install(proposal: dict, files: dict[str, str], *, draft_dir: Path, note: str
     if dest.exists():
         shutil.rmtree(dest)
     dest.parent.mkdir(parents=True, exist_ok=True)
-    os.replace(tmp, dest)
+    store._replace(str(tmp), dest)  # retried on Windows (e.g. a virus scanner holding the folder)
     if link is not None:
         link.parent.mkdir(parents=True, exist_ok=True)
         if link.exists() and (link / COPY_MARKER).exists():
