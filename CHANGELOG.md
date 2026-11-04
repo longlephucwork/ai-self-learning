@@ -7,7 +7,12 @@ What changed in each version of the learning harness. The format follows
 ## [Unreleased]
 
 ### Added
-- **Muscle memory can make scripts.** `refine.py promote <skill> --as script` turns a well-practised skill into a script instead of an MCP tool. Set `"promote_as": "script"` under `"auto"` in `store/config.json` to have the background run do the same. `refine.py demote` works for both.
+- **Muscle memory can make scripts.** `refine.py promote <skill> --as script` turns a well-practised skill into a script instead of an MCP tool. The script's tests are the real inputs and outputs of the skill's uses, as for a tool, and approving it retires the skill.
+- New setting `"promote_as"` under `"auto"` in `store/config.json`: `"tool"` (the default) or `"script"`. It decides what the background run, and `promote` without `--as`, turns a skill into.
+
+### Changed
+- `refine.py demote` brings a skill back from a promoted script as well as a tool, and says which one it removed.
+- `review/cli.py approve` names what will replace the retired skill (the tool or the script).
 
 ## [0.0.2] - 2026-11-04
 
