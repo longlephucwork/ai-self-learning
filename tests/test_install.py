@@ -54,6 +54,58 @@ class Installer(unittest.TestCase):
             rc = install.main(list(argv))
         return rc, out.getvalue()
 
+    def run_interactive(self, answer, *argv, sandbox_backend=None):
+        from harness_lib import sandbox
+        out = io.StringIO()
+        patches = [mock.patch.object(install, "IS_WIN", False),
+                   mock.patch.object(install, "_win_env", side_effect=AssertionError("registry touched")),
+                   mock.patch("sys.stdin.isatty", return_value=True),
+                   mock.patch("builtins.input", side_effect=lambda prompt="": self.prompts.append(prompt) or answer)]
+        self.prompts = []
+        if sandbox_backend:
+            patches.append(mock.patch.object(sandbox, "_backend", sandbox_backend))
+        with redirect_stdout(out):
+            for p in patches:
+                p.start()
+            try:
+                rc = install.main(["--skip-tests", *argv])
+            finally:
+                for p in reversed(patches):
+                    p.stop()
+        return rc, out.getvalue()
+
+    def test_simple_install_is_one_question(self):
+        rc, out = self.run_interactive("")                                        # Enter = yes
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(len(self.prompts), 1, self.prompts)                         # exactly one question
+        for line in ("log your Claude Code sessions", "learn in the background", 'say "learn this"',
+                     "available to Claude", "check for new releases"):
+            self.assertIn(line, out)
+        self.assertNotIn("without network isolation", out)                       # this machine has a sandbox
+        self.assertTrue(install.hooks_installed())
+        self.assertIn("Done. Use Claude Code as usual", out)
+
+    def test_simple_install_no_changes_nothing(self):
+        rc, out = self.run_interactive("n")
+        self.assertEqual(rc, 1)
+        self.assertIn("Cancelled; nothing was changed", out)
+        self.assertFalse((Path(os.environ["HOME"]) / ".claude" / "settings.json").exists())
+        self.assertFalse(any(c[:2] == ["mcp", "add"] for c in (self.calls() if (self.t / "calls.json").exists() else [])))
+
+    def test_simple_install_without_sandbox_says_so_in_the_summary(self):
+        from harness_lib import sandbox
+        rc, out = self.run_interactive("y", sandbox_backend="none")
+        self.assertEqual(rc, 0, out)
+        self.assertIn("test drafted scripts without network isolation", out)
+        self.assertEqual(len(self.prompts), 1, self.prompts)                         # still one question
+        with mock.patch.object(sandbox, "_backend", "none"):
+            self.assertTrue(sandbox.may_run()[0])                                 # the yes covered it
+
+    def test_custom_still_asks_step_by_step(self):
+        rc, out = self.run_interactive("y", "--custom")
+        self.assertEqual(rc, 0, out)
+        self.assertGreater(len(self.prompts), 3)
+
     def test_rc_block_is_idempotent_and_removable(self):
         rc = Path(os.environ["HOME"]) / ".zshrc"
         rc.write_text("alias ll='ls -l'\n")

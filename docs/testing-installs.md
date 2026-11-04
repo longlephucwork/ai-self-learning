@@ -38,7 +38,7 @@ If it fails (`Operation not permitted`), unprivileged user namespaces are disabl
 
 Without it the installer still works, but validation and MCP tools refuse to run code unless you opt in.
 
-**3. Run the installer.** Run `./install.sh`, or the `curl ... | bash` one-liner from the README. Expected:
+**3. Run the installer.** Run `./install.sh`, or the `curl ... | bash` one-liner from the README. It checks the machine, shows one summary of what it will set up, and asks a single question, `Install? [Y/n]`. Expected:
 - `[ok]` for Python, git and the Claude Code CLI
 - `[ok] code sandbox: unshare (network blocked for generated code and tools)`
 - `[ok] self-test: OK`
@@ -130,10 +130,9 @@ py -3 --version; git --version; claude --version
 If `python` opens the Microsoft Store instead of running, turn off its alias in *Settings > Apps > Advanced app settings > App execution aliases*.
 
 **2. Run the installer.** Run `.\install.bat`, or the `irm ... | iex` one-liner from the README. Expected:
-- `[ok]` for Python, git and the Claude Code CLI
-- `[warn] no code sandbox on this system: native Windows has no equivalent; WSL gives you the Linux sandbox`
-- the question `Allow running code without network isolation? [y/N]`: answer **N** for this test, and expect `[warn] left disabled ...`
-- `[ok] self-test: OK`, then `[ok]` for the hooks, the MCP server and the PATH
+- `[ok]` for Python, git and the Claude Code CLI, then `[warn] no code sandbox on this system: native Windows has none; WSL gives you one`, and `[ok] self-test: OK`
+- one summary of what will be set up, including the line `test drafted scripts without network isolation ...`, then a single question, `Install? [Y/n]`
+- after Enter: `[ok]` for the hooks, automatic learning, the `learn this` skill, the MCP server, the PATH, the update check, and `drafted scripts will be tested without network isolation`
 
 **3. Status.** Open a **new** terminal first, so the PATH change applies. Expect `hooks installed`, `MCP server `learned` registered` and `bin/ on PATH`:
 ```powershell

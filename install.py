@@ -171,6 +171,40 @@ def check_prereqs() -> bool:
 
 # ---------------- 2. sandbox ----------------
 
+def sandbox_probe() -> tuple[bool, str]:
+    """(isolated, one-line description). Asks nothing."""
+    sys.path.insert(0, str(REPO))
+    from harness_lib import sandbox, store
+    b = sandbox.backend()
+    if b != "none":
+        probe = ("import socket\ntry:\n socket.create_connection(('1.1.1.1', 53), timeout=3); print('open')\n"
+                 "except OSError:\n print('blocked')\n")
+        home = str(store.store_dir())
+        r = sandbox.run([sys.executable, "-I", "-c", probe], cwd=home, env=sandbox.clean_env(home), timeout=20)
+        if r.stdout.strip() == "blocked":
+            return True, f"code sandbox: {b} (network blocked for generated code and tools)"
+        return False, f"code sandbox {b} started, but the network probe said {r.stdout.strip() or r.stderr.strip()!r}"
+    hint = {"Linux": "unprivileged user namespaces are off (Ubuntu 24.04+: see docs/testing-installs.md > Linux)",
+            "Windows": "native Windows has none; WSL gives you one",
+            "macOS": "sandbox-exec is missing or blocked"}.get(base_os(), "")
+    if wsl_version() == "WSL1":
+        hint = "WSL1 has no network namespaces; convert the distro to WSL2 (wsl --set-version <distro> 2)"
+    elif base_os() == "Linux" and in_container():
+        hint = ("inside a container, Docker's default seccomp profile blocks `unshare`; start the container with "
+                "--security-opt seccomp=docker/seccomp-userns.json (see docs/testing-installs.md > Docker)")
+    return False, f"no code sandbox on this system: {hint}"
+
+
+def allow_unsandboxed() -> None:
+    sys.path.insert(0, str(REPO))
+    from harness_lib import store
+    cfg_path = store.store_dir() / "config.json"
+    cfg = store.read_json(cfg_path) or {}
+    cfg["allow_unsandboxed"] = True
+    store.write_json_atomic(cfg_path, cfg)
+    ok("drafted scripts will be tested without network isolation (the safety scan still runs)")
+
+
 def sandbox_status(ui: UI, allow_flag: bool, dry: bool = False) -> None:
     sys.path.insert(0, str(REPO))
     from harness_lib import sandbox, store
@@ -544,11 +578,83 @@ def auto_status() -> None:
         ok(f"{n} draft(s) waiting for you: python3 review/cli.py proposals")
 
 
+# ---------------- the default: one summary, one question ----------------
+
+def simple_install(a, ui: UI) -> int:
+    sys.path.insert(0, str(REPO))
+    from harness_lib import sandbox
+    say("\nChecking this machine ...")
+    if not check_prereqs():
+        say("\nFix the [fail] items above, then run the installer again.")
+        return 1
+    isolated, line = sandbox_probe()
+    (ok if isolated else warn)(line)
+    if not a.skip_tests and not self_test():
+        say("\nThe self-test failed, so nothing was changed. Run again with --skip-tests to install anyway.")
+        return 1
+
+    budget = a.budget if a.budget is not None else auto_config().get("monthly_budget_usd", 5.0)
+    already_allowed = sandbox.allow_unsandboxed()
+    # Turning off network isolation is shown and confirmed in the summary; an unattended --yes never does it
+    # by itself (it needs --allow-unsandboxed).
+    offer_unsandboxed = not isolated and not already_allowed and (ui.interactive or a.allow_unsandboxed)
+    plan = []
+    if not a.no_hooks:
+        plan.append("log your Claude Code sessions (on this machine only, in store/)")
+    if not a.no_auto and not (a.no_hooks and not hooks_installed()):
+        plan.append(f"learn in the background: at most once a day, up to ${budget:.0f}/month; "
+                    "nothing installs without your OK")
+    if not a.no_learn_skill:
+        plan.append('let you say "learn this" in any session')
+    if not a.no_mcp or not a.no_path:
+        plan.append("make the tools and scripts it learns available to Claude")
+    if not a.no_update_check:
+        plan.append("check for new releases once a day (Claude asks before updating)")
+    if offer_unsandboxed:
+        plan.append("test drafted scripts without network isolation: this machine has no sandbox "
+                    "(WSL gives you one; skills are never run)")
+    say("\nThis will set up the learning harness for all your Claude Code projects:")
+    for item in plan:
+        say(f"  - {item}")
+    if not ui.ask("\nInstall?"):
+        say("Cancelled; nothing was changed.")
+        return 1
+
+    say("")
+    if not a.no_hooks:
+        setup_hooks()
+    if not a.no_auto and not (a.no_hooks and not hooks_installed()):
+        setup_auto(enable=True, budget=budget)
+    if not a.no_learn_skill:
+        setup_builtin_skill()
+    if not a.no_mcp:
+        setup_mcp()
+    if not a.no_path:
+        setup_path()
+    if not a.no_update_check:
+        _upd().set_config(check=True)
+        ok("daily update check on: Claude will tell you when a new release is out")
+    else:
+        _upd().set_config(check=False)
+    if offer_unsandboxed:
+        allow_unsandboxed()
+    elif not isolated and not already_allowed:
+        warn("left disabled: drafted scripts can't be tested on this machine without a sandbox. Skills still "
+             "work. To allow it: install.py --allow-unsandboxed (or use WSL)")
+
+    py = "python" if IS_WIN else "python3"
+    say("\nDone. Use Claude Code as usual: Claude tells you when it has learned something.")
+    say('  - Say "learn this" in a session to learn from it right away.')
+    say(f"  - Status: {py} install.py --check      Undo: {py} install.py --uninstall")
+    return 0
+
+
 # ---------------- main ----------------
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--yes", "-y", action="store_true", help="accept defaults without asking")
+    ap.add_argument("--yes", "-y", action="store_true", help="install everything without asking")
+    ap.add_argument("--custom", action="store_true", help="ask about each part separately")
     ap.add_argument("--check", action="store_true", help="report status only")
     ap.add_argument("--uninstall", action="store_true")
     ap.add_argument("--no-hooks", action="store_true")
@@ -600,6 +706,9 @@ def main(argv=None) -> int:
             setup_path(uninstall=True)
         say(f"\ndone. To delete everything else: remove {REPO}")
         return 0
+
+    if not a.custom:
+        return simple_install(a, ui)
 
     say("\n1. prerequisites")
     if not check_prereqs():

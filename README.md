@@ -15,7 +15,7 @@ curl -fsSL https://raw.githubusercontent.com/longlephucwork/claude-learning-harn
 irm https://raw.githubusercontent.com/longlephucwork/claude-learning-harness/main/install.ps1 | iex
 ```
 
-The installer clones the repo to `~/claude-learning-harness` and asks before each change. Per-OS notes (including Docker, and Ubuntu 24.04's sandbox setting) are in [docs/testing-installs.md](docs/testing-installs.md).
+The installer clones the repo to `~/claude-learning-harness`, checks your machine, shows what it will set up and asks once: `Install? [Y/n]`. (Use `--custom` to choose each part.) Per-OS notes (including Docker, and Ubuntu 24.04's sandbox setting) are in [docs/testing-installs.md](docs/testing-installs.md).
 
 ## Use
 
