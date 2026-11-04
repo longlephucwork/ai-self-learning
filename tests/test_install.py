@@ -165,7 +165,7 @@ class Installer(unittest.TestCase):
         self.assertEqual((cfg["enabled"], cfg["monthly_budget_usd"]), (True, 5.0))
         self.assertIn("automatic learning on", out)
         settings = json.loads((Path(os.environ["HOME"]) / ".claude" / "settings.json").read_text())
-        self.assertEqual(sorted(settings["hooks"]), ["SessionEnd", "SessionStart", "Stop"])
+        self.assertEqual(sorted(settings["hooks"]), ["SessionEnd", "SessionStart", "Stop", "UserPromptSubmit"])
         rc, out = self.run_main("--yes", "--skip-tests", "--no-mcp", "--no-path", "--budget", "2.5")
         self.assertEqual(auto.config()["monthly_budget_usd"], 2.5)
         rc, out = self.run_main("--check")

@@ -166,7 +166,9 @@ def write_brief(pattern_key: str, *, improve: dict | None = None) -> dict:
         shutil.rmtree(root)
     root.mkdir(parents=True)
     members = [s for s in pattern["session_ids"] if s not in pattern.get("excluded_injection", [])]
-    good = [s for s in members if store.outcome(s)["outcome"] in pattern.get("success_outcomes", ["accepted", "edited"])]
+    ok = pattern.get("success_outcomes", ["accepted", "edited"])
+    good = [s for s in members if store.outcome(s)["outcome"] in ok
+            or (pattern.get("quick") and store.outcome(s)["outcome"] != "redone")]
     cases = [c for i, sid in enumerate(good[:MAX_EVAL_SESSIONS], 1) if (c := _write_case(root, i, sid))]
     target = target_dir(name)
     phrases = sorted({r["text"].split("\n")[0][:120] for s in good for r in (store.load_session(s) or {}).get("requests", [])[:1]})

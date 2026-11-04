@@ -19,15 +19,16 @@ The installer clones the repo to `~/claude-learning-harness`, checks your machin
 
 ## Use
 
-Use Claude Code as usual. In the background, the harness:
-1. logs each session
-2. rates how it went
-3. spots tasks you've done 3+ times
-4. drafts and checks an artifact for each one
+Use Claude Code as usual. The loop:
 
-Every few hours, within $5/month. When a draft is ready, Claude mentions it at the start of your next session. When it can't tell whether a repeated task went well, Claude asks you instead of guessing. Say yes to see it, then yes again to install it.
+1. **You repeat a task.** Claude notices it's one you've asked for before, does it, then offers to make it reusable.
+2. **You say yes.** A task that needs judgment becomes a skill, which Claude builds with you using skill-creator. A mechanical task becomes a tested script or tool.
+3. **You approve.** Claude shows what it made and installs it only on your yes. From then on, Claude Code uses it.
+4. **It improves.** When you have to correct a skill's results, the harness writes an update brief, and Claude offers to update the skill the same way.
 
-**Learn right away:** say **"learn this"** in any session to learn from that one session. Claude asks before installing anything.
+If you decline, a background run (every few hours, within $5/month) still learns tasks you repeat 3+ times. It also rates how sessions went. Claude mentions what's ready at the start of your next session. When it can't tell whether a repeated task went well, Claude asks you instead of guessing.
+
+**Learn right away:** say **"learn this"** in any session. Claude asks before installing anything.
 
 **Skills are built with [skill-creator](https://github.com/anthropics/skills).** The harness never writes a skill itself. When a task needs judgment, it prepares a brief from your sessions: what you asked, what you accepted, your corrections, and ready-made test cases. Claude then offers to build the skill with skill-creator, together with you. Scripts and tools are drafted and tested by the harness.
 

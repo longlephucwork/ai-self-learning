@@ -312,7 +312,7 @@ def validate_draft(proposal: dict, files: dict[str, str], pattern: dict, *, allo
     for t in tests:
         if t.get("provenance") in ("logged", "derived_from_feedback"):
             covered |= {m for m in successful if m.startswith(t.get("source_session") or "\0")}
-    need = min(3, len(successful))
+    need = min(1 if pattern.get("quick") else 3, len(successful))  # quick learn: the session asked about
     report["coverage"] = {"successful_sessions": len(successful), "covered": len(covered), "required": need}
     if len(covered) < need:
         report["problems"].append(f"tests cover {len(covered)} successful session(s); need {need}")
@@ -529,7 +529,7 @@ def validate_skill(proposal: dict, files: dict[str, str], pattern: dict, *, allo
     # 2. evidence: a judged check against each successful session (only once everything cheaper passed).
     successful = sorted(m for m in members
                         if store.outcome(m)["outcome"] in pattern.get("success_outcomes", ["accepted"]))
-    need = min(3, len(successful))
+    need = min(1 if pattern.get("quick") else 3, len(successful))  # quick learn: the session asked about
     if not P:
         judged = judge.judge_skill(files, successful, previous=(previous or {}).get("judged"))
         rep["judged"] = judged

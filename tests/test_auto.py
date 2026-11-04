@@ -1,5 +1,6 @@
 """Automatic learning: inferred ratings, budget, throttle, lock, background run, SessionStart note."""
 import io
+from contextlib import redirect_stdout
 import json
 import os
 import sys
@@ -15,6 +16,15 @@ sys.path.insert(0, str(ROOT))
 from tests.test_phase3 import SESSIONS, proposal, transcript  # noqa: E402
 
 RULES = {"k,v": ["edited", 0.8, "wanted v as a number"]}   # the kv session reads as "user corrected it"
+
+
+def submit(sid, prompt):
+    from hooks.log_session import prompt_submit
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        prompt_submit({"hook_event_name": "UserPromptSubmit", "session_id": sid, "prompt": prompt})
+    out = buf.getvalue().strip()
+    return json.loads(out)["hookSpecificOutput"]["additionalContext"] if out else None
 
 
 class Auto(unittest.TestCase):
@@ -314,6 +324,43 @@ class Auto(unittest.TestCase):
         self.assertTrue(state.exists(), (self.store.store_dir() / "auto.log").read_text()[-800:])
         self.assertEqual(self.store.outcome("s-fruit")["source"], "inferred")
         self.assertIn("auto run finished", (self.store.store_dir() / "auto.log").read_text())
+
+    # ---------------- learning while you work ----------------
+
+    def test_similarity(self):
+        from harness_lib import similar
+        a = similar.words("Convert in.csv to JSON please")
+        self.assertEqual(a, {"convert", "in.csv", "json"})
+        self.assertGreater(similar.score(a, similar.words("convert in.csv to json")), 0.9)
+        self.assertEqual(similar.score(a, similar.words("write a poem about the sea")), 0.0)
+
+    def test_repeat_is_suggested_once_per_session(self):
+        self.add_sessions()
+        self.assertIsNone(submit("new-1", "Convert in.csv to JSON"))       # automatic learning off: quiet
+        self.auto.set_config(enabled=True)
+        self.assertIsNone(submit("new-1", "What does this repository do?"))  # not a repeat
+        text = submit("new-1", "Convert in.csv to JSON")
+        self.assertIn("asked for this kind of task before", text)
+        self.assertIn("refine.py learn", text)
+        self.assertIn("explicit", text)
+        self.assertIsNone(submit("new-1", "Convert in.csv to JSON"))       # once per session
+        self.assertIsNotNone(submit("new-2", "convert in.csv to json"))
+
+    def test_redone_sessions_dont_count(self):
+        self.add_sessions()
+        self.auto.set_config(enabled=True)
+        for sid in ("s-fruit", "s-price"):
+            self.store.rate(sid, "redone")
+        self.assertIsNone(submit("new-1", "Convert in.csv to JSON"))       # one good earlier session: not enough
+
+    def test_learned_task_points_to_what_was_learned(self):
+        self.add_sessions()
+        self.auto.set_config(enabled=True)
+        self.store.save_pattern({"key": "csv-json", "label": "csv json", "status": "installed",
+                                 "session_ids": ["s-fruit", "s-kv"]})
+        text = submit("new-1", "Convert in.csv to JSON")
+        self.assertIn("already learned", text)
+        self.assertNotIn("refine.py learn", text)
 
 
 if __name__ == "__main__":

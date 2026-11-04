@@ -100,6 +100,8 @@ def hook_main() -> int:
     event = payload.get("hook_event_name")
     if event == "SessionStart":
         return session_start()
+    if event == "UserPromptSubmit":
+        return prompt_submit(payload)
     if event == "Stop" and payload.get("stop_hook_active"):
         return 0  # we're inside a stop-hook continuation loop; nothing new to log
     tp = payload.get("transcript_path")
@@ -135,6 +137,63 @@ def session_start() -> int:
     if text:
         print(json.dumps({"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": text}}))
     return 0
+
+
+def prompt_submit(payload: dict) -> int:
+    """When the user asks for a task they've done before, tell Claude to offer learning it once it's done.
+
+    Plain text matching against earlier sessions (harness_lib/similar.py): fast, local, no model call.
+    At most once per session, and only with automatic learning on."""
+    try:
+        from harness_lib import similar
+        from refine import auto
+        cfg = auto.config()
+        sid, prompt = payload.get("session_id"), payload.get("prompt") or ""
+        if not cfg["enabled"] or not sid or not prompt.strip():
+            return 0
+        seen_path = store.store_dir() / "suggested.json"
+        seen = store.read_json(seen_path) or {}
+        if sid in seen:
+            return 0
+        prior = [s for s, _ in similar.similar_sessions(prompt, exclude=sid)
+                 if store.outcome(s)["outcome"] != "redone"]
+        if len(prior) < max(1, int(cfg["min_success"]) - 1):
+            return 0
+        seen[sid] = store.now()
+        seen = dict(sorted(seen.items(), key=lambda kv: kv[1])[-1000:])   # keep the file small
+        store.write_json_atomic(seen_path, seen)
+        print(json.dumps({"hookSpecificOutput": {"hookEventName": "UserPromptSubmit",
+                                                 "additionalContext": repeat_context(prior, similar)}}))
+    except Exception:
+        _log_error(traceback.format_exc().replace("\n", " | "))
+    return 0
+
+
+def repeat_context(prior: list[str], similar) -> str:
+    py = Path(sys.executable).resolve().as_posix()
+    tool = (store.REPO_ROOT / "refine" / "refine.py").as_posix()
+    cli = (store.REPO_ROOT / "review" / "cli.py").as_posix()
+    shown = []
+    for s in prior[:4]:
+        rec = store.load_session(s) or {}
+        shown.append(f"{(rec.get('started_at') or '')[:10]}: {(rec.get('first_request') or '')[:70]!r}")
+    p = similar.learned_already(prior)
+    if p and p["status"] == "installed":
+        return (f"[learning-harness] This looks like a task the user has done before ({len(prior)} earlier sessions), "
+                f"which the harness has already learned (pattern '{p['key']}'). Use what was learned for it (its skill, "
+                f"tool or script) rather than redoing the work by hand.")
+    if p:
+        return (f"[learning-harness] This looks like a task the user has done before ({len(prior)} earlier sessions). "
+                f"Something learned from it is waiting for the user (pattern '{p['key']}', status {p['status']}). After "
+                f"the task, mention it in one sentence and offer to finish it ({py} {cli} proposals lists drafts; a skill "
+                f"brief is built with skill-creator).")
+    return ("[learning-harness] The user has asked for this kind of task before, in " + str(len(prior)) +
+            " earlier sessions (" + "; ".join(shown) + "). Do the task as usual. When it's done, offer in one sentence "
+            "to turn it into something reusable, so next time takes less effort. Only if the user agrees, run: "
+            f"{py} {tool} learn   (it learns from this session together with those earlier ones). Then follow "
+            "what it prints: for SKILL BRIEF, build the skill with skill-creator from that brief and run the adopt "
+            "command it names; for a validated draft, offer to show it. Install nothing without the user's explicit "
+            "yes. Don't bring this up again in this session if they decline.")
 
 
 def maybe_check_update() -> None:

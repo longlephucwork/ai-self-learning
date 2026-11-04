@@ -76,7 +76,8 @@ class Memory(p4.Phase4):
         o = self.store.outcome(sid)
         self.assertEqual((o["outcome"], o["source"]), ("accepted", "manual"))  # "learn this" = accepting it
         p = self.store.load_pattern(r["pattern"])
-        self.assertEqual((p["n_sessions"], p["quick"], p["status"]), (1, True, "proposed"))
+        self.assertEqual((p["quick"], p["status"]), (True, "proposed"))
+        self.assertIn(sid, p["session_ids"])
         meta = json.loads((Path(os.environ["LEARNING_HARNESS_GENERATED"]) / "quick-csv" / "proposal.json").read_text())
         self.assertTrue(meta["quick"])
         rc, out = self.cli("review", "quick-csv")
@@ -268,6 +269,36 @@ class Memory(p4.Phase4):
             (home / ".claude" / "skills" / "learning-harness").mkdir(parents=True)    # someone else's folder
             installer.setup_builtin_skill()
             self.assertFalse((home / ".claude" / "skills" / "learning-harness" / "SKILL.md").exists())
+
+
+    # ---------------- learning while you work ----------------
+
+    def test_corrected_skill_gets_an_improvement_brief(self):
+        from refine import auto
+        self.install_skill()
+        self.assertEqual(auto.improvements_needed(), [])
+        self.use_skill(2)
+        self.use_skill(3, outcome="edited", start=2)
+        for i in range(2, 5):
+            self.store.rate(f"use-edited-{i}", "edited", "qty must stay a string")
+        need = auto.improvements_needed()
+        self.assertEqual([n["entry"]["name"] for n in need], ["csv-skill"])
+        made = auto.brief_improvements()
+        self.assertEqual(made, ["csv-skill"])
+        root = Path(os.environ["LEARNING_HARNESS_INSTALL_ROOT"]) / "briefs" / "csv-skill"
+        brief = (root / "BRIEF.md").read_text()
+        self.assertIn("This is an update of an existing skill", brief)
+        self.assertIn("qty must stay a string", brief)
+        self.assertEqual(json.loads((root / "brief.json").read_text())["improve"]["name"], "csv-skill")
+        self.assertEqual(auto.improvements_needed(), [])                  # once per version
+        self.assertIn("an update of the skill 'csv-skill'", auto.session_start_context())
+
+    def test_accurate_skill_is_left_alone(self):
+        from refine import auto
+        self.install_skill()
+        self.use_skill(5)
+        self.use_skill(1, outcome="edited", start=5)
+        self.assertEqual(auto.improvements_needed(), [])
 
 
 for _n in [n for n in vars(p4.Phase4) if n.startswith("test_")]:

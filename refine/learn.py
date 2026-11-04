@@ -59,7 +59,14 @@ def learn(session: str | None = None, *, model: str | None = None, log=print) ->
     if s.get("injection_suspected"):
         raise LearnError("the session looks like it contains a prompt injection, so it can't be learned from")
 
-    existing = [p for p in store.iter_patterns() if sid in p.get("session_ids", [])]
+    from harness_lib import similar
+    first = (store.load_session(sid) or {}).get("first_request") or ""
+    prior = [s for s, _ in similar.similar_sessions(first, exclude=sid) if store.outcome(s)["outcome"] != "redone"
+             and not ((store.load_summary(s) or {}).get("summary", {}).get("injection_suspected"))]
+    if prior:
+        log(f"also learning from {len(prior)} earlier session(s) of the same task")
+    existing = [p for p in store.iter_patterns() if sid in p.get("session_ids", [])
+                or set(prior) & set(p.get("session_ids", []))]
     for p in existing:
         if p["status"] in ("installed", "proposed", "briefed"):
             raise LearnError(f"already learned as pattern {p['key']!r} ({p['status']})")
@@ -67,17 +74,19 @@ def learn(session: str | None = None, *, model: str | None = None, log=print) ->
         key = existing[0]["key"]
         pattern = existing[0]
         pattern["status"] = "candidate"
+        pattern["quick"] = True
+        pattern["session_ids"] = sorted(set(pattern.get("session_ids", [])) | {sid} | set(prior))
     else:
         key = slugify(summ["task_family"])
         if store.load_pattern(key):
             key = f"{key}-{sid[:8]}"
         det = bool(s.get("deterministic"))
         pattern = {"key": key, "label": key.replace("-", " "), "description": s.get("intent", ""),
-                   "status": "candidate", "n_sessions": 1, "n_success": 1, "min_success": 1,
+                   "status": "candidate", "n_sessions": 1 + len(prior), "n_success": 1, "min_success": 1,
                    "success_outcomes": ["accepted", "edited"], "deterministic_frac": 1.0 if det else 0.0,
                    "suggested_type": "script" if det else "skill",
                    "type_rationale": f"quick learn from one session; {s.get('deterministic_reason', '')}",
-                   "session_ids": [sid], "excluded_injection": [], "method": "quick", "quick": True,
+                   "session_ids": sorted({sid, *prior}), "excluded_injection": [], "method": "quick", "quick": True,
                    "created_at": store.now(), "updated_at": store.now()}
     store.save_pattern(pattern)
     if pattern["suggested_type"] == "skill":

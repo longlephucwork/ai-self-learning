@@ -38,6 +38,7 @@ Only the hook writes `session.json`, and only `review/cli.py rate` and the autom
 
 ### Hook design (checked against the Claude Code hooks docs, Nov 2026)
 - **Stop** fires after every turn and ingests the whole session again (idempotent). Data survives even when a session is killed without a clean exit, which is common in cloud containers. It takes `last_assistant_message` from the payload because the docs say the transcript may lag at Stop time. It skips when `stop_hook_active` is true.
+- **UserPromptSubmit** compares your prompt with the first request of earlier sessions (word overlap, local, no model call; `harness_lib/similar.py`). On a repeat it tells Claude to offer learning the task once it's done. See *Learning while you work* below.
 - **SessionEnd** records `ended_at` and `reason` (`clear|resume|logout|prompt_input_exit|other`). SessionEnd can't block, and its default budget is 1.5s, so the hook sets `timeout: 30`.
 - The hook always exits 0. Errors go to `store/hook_errors.log`.
 - Set `LEARNING_HARNESS_DISABLE=1` to skip logging. Later phases use this for their own `claude -p` calls so the harness doesn't learn from itself.
@@ -341,7 +342,20 @@ learned/briefs/<name>/
    It then makes the skill a normal draft. Bundled scripts don't need harness tests, because skill-creator's evals cover them, but they still go through the safety scan.
 4. **Approve** as usual. It's linked into `~/.claude/skills/`, and usage tracking, promotion to a tool and retirement work as for any learned item.
 
-Updating an installed skill works the same way: `refine.py revise <skill>` writes an "update this skill" brief for skill-creator's *improving an existing skill* flow, listing the observed failures.
+Updating an installed skill works the same way, and happens on its own (see *Learning while you work*). By hand, `refine.py revise <skill>` writes an "update this skill" brief for skill-creator's *improving an existing skill* flow, listing the observed failures.
+
+## Learning while you work
+
+The everyday loop needs no commands from you:
+
+1. **You repeat a task.** When your prompt looks like the first request of earlier sessions (word overlap of 45%+ with at least `min_success - 1` earlier sessions not rated `redone`), the `UserPromptSubmit` hook adds a note to Claude's context. Claude does the task, then offers once to make it reusable. This happens at most once per session (`store/suggested.json`), only with automatic learning on.
+2. **You say yes.** Claude runs `refine.py learn`, which learns from this session *together with* those earlier ones. A judgment task becomes a skill brief, and Claude builds the skill with skill-creator right there, then runs `review/cli.py adopt`. A mechanical task becomes a validated script or tool draft.
+3. **You approve.** Claude shows it and installs it only on your explicit yes. Skills are linked into `~/.claude/skills/`, so Claude Code loads them from then on. Tools appear through the MCP server, and scripts are listed at the start of each session.
+4. **It improves.** Every use is tracked. If the user had to correct a skill's results (at least 2 uses failed or were rated `edited`/`redone`, and accuracy is under 80%), the next background run writes an improvement brief listing the corrections. Claude offers at the start of a session to update the skill with skill-creator, then adopt and approve as before. Each skill version is briefed once. A skill that's used often and accurately for a mechanical task is proposed as a tool instead (*Muscle memory*).
+
+If you say no, or ignore the offer, the background run still learns the task once it's repeated `min_success` times, and Claude mentions the result at the start of a later session.
+
+If the task is already learned, the note tells Claude to use the learned item. If a draft or brief is waiting, it tells Claude to mention it.
 
 ## How Claude finds what was learned
 
