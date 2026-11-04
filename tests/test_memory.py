@@ -12,7 +12,7 @@ from unittest import mock
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 from tests import test_phase4 as p4  # noqa: E402
-from tests.test_phase3 import GOOD_SCRIPT, SESSIONS, proposal, test_case, transcript  # noqa: E402
+from tests.test_phase3 import SESSIONS, proposal, test_case, transcript  # noqa: E402
 
 SKILL_MD = ("---\nname: csv-skill\ndescription: Convert CSV files to JSON\n---\n\n"
             "Read the CSV and write a JSON array of objects; numbers become numbers.\n")

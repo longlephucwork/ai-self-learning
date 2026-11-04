@@ -119,6 +119,11 @@ def hook_main() -> int:
     if event == "SessionEnd":
         maybe_start_auto()
         maybe_check_update()
+        try:   # keep the repeat-detection index warm, so the next prompt's check is a quick stat() pass
+            from harness_lib import similar
+            similar._index()
+        except Exception:
+            _log_error(traceback.format_exc().replace("\n", " | "))
     return 0
 
 

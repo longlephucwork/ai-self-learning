@@ -28,12 +28,43 @@ def score(a: set[str], b: set[str]) -> float:
     return len(a & b) / len(a | b) if a and b else 0.0
 
 
+def _index() -> list[dict]:
+    """(session_id, started_at, first_request) of every session, cached in store/request_index.json.
+
+    session.json files hold every step and can be hundreds of KB, so the hook only re-reads the ones whose
+    modification time changed since the last prompt; the rest is a stat() per session."""
+    path = store.store_dir() / "request_index.json"
+    cache = store.read_json(path) or {}
+    out, fresh, changed = [], {}, False
+    root = store.sessions_dir()
+    for d in root.iterdir() if root.exists() else []:
+        f = d / "session.json"
+        try:
+            mtime = f.stat().st_mtime_ns
+        except OSError:
+            continue
+        row = cache.get(d.name)
+        if not row or row.get("mtime") != mtime:
+            rec = store.read_json(f) or {}
+            row = {"mtime": mtime, "started_at": rec.get("started_at") or "",
+                   "first_request": (rec.get("first_request") or "")[:4000]}
+            changed = True
+        fresh[d.name] = row
+        out.append({"session_id": d.name, **row})
+    if changed or len(fresh) != len(cache):
+        try:
+            store.write_json_atomic(path, fresh)
+        except OSError:
+            pass   # a read-only or locked store only costs speed
+    return out
+
+
 def similar_sessions(prompt: str, *, exclude: str | None = None, min_score: float = MIN_SCORE) -> list[tuple[str, float]]:
     """Earlier sessions whose first request looks like `prompt`, best first."""
     target = words(prompt)
     if len(target) < 3:
         return []
-    recs = sorted(store.iter_sessions(), key=lambda r: r.get("started_at") or "", reverse=True)[:MAX_SCAN]
+    recs = sorted(_index(), key=lambda r: r["started_at"], reverse=True)[:MAX_SCAN]
     out = []
     for r in recs:
         if r["session_id"] == exclude or not r.get("first_request"):

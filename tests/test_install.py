@@ -237,7 +237,8 @@ class Installer(unittest.TestCase):
 
     def test_learned_items_live_in_a_local_repo_that_is_never_pushed(self):
         """learned/ is its own git repo (created on first use) and the code repo ignores it."""
-        import subprocess, tempfile
+        import subprocess
+        import tempfile
         from harness_lib import store
         with mock.patch.dict(os.environ):
             os.environ.pop("LEARNING_HARNESS_INSTALL_ROOT", None)   # check the real default
@@ -256,7 +257,6 @@ class Installer(unittest.TestCase):
 
     def test_wrapper_finds_the_store_relative_to_itself(self):
         import tempfile
-        from harness_lib import store
         from registry import install as reg
         with tempfile.TemporaryDirectory() as d:
             os.environ["LEARNING_HARNESS_INSTALL_ROOT"] = str(Path(d) / "learned")

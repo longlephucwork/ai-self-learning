@@ -133,7 +133,7 @@ class Auto(unittest.TestCase):
         self.auto.set_config(enabled=True)
         self.add_sessions()
         os.environ["FAKE_CLAUDE_FAIL"] = "1"
-        r = self.auto.run()
+        self.auto.run()
         st = self.auto.state()
         self.assertIn("last_error", st)
         self.assertNotIn("last_run_at", st)
@@ -142,7 +142,7 @@ class Auto(unittest.TestCase):
         later = datetime.now(timezone.utc) + timedelta(hours=1, minutes=1)
         self.assertTrue(self.auto.should_run(now=later)[0])               # retried after an hour, not 24 h
         os.environ.pop("FAKE_CLAUDE_FAIL")
-        r = self.auto.run(force=True)
+        self.auto.run(force=True)
         self.assertNotIn("last_error", self.auto.state())
         self.assertIn("last_run_at", self.auto.state())
 
@@ -333,6 +333,15 @@ class Auto(unittest.TestCase):
         self.assertEqual(a, {"convert", "in.csv", "json"})
         self.assertGreater(similar.score(a, similar.words("convert in.csv to json")), 0.9)
         self.assertEqual(similar.score(a, similar.words("write a poem about the sea")), 0.0)
+
+    def test_repeat_index_only_rereads_changed_sessions(self):
+        from harness_lib import similar
+        self.add_sessions()
+        self.assertEqual(len(similar.similar_sessions("Convert in.csv to JSON")), 3)
+        self.assertTrue((self.store.store_dir() / "request_index.json").exists())
+        with mock.patch.object(self.store, "read_json", wraps=self.store.read_json) as rj:
+            similar.similar_sessions("Convert in.csv to JSON")
+        self.assertFalse([c for c in rj.call_args_list if str(c.args[0]).endswith("session.json")])
 
     def test_repeat_is_suggested_once_per_session(self):
         self.add_sessions()

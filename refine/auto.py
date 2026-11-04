@@ -410,13 +410,15 @@ def brief_improvements(log=lambda *_: None) -> list[str]:
             continue
         # the sessions that used the skill, with the user's corrections, become the brief's evidence
         pattern["session_ids"] = sorted(set(pattern.get("session_ids", [])) | set(item["sessions"]))
-        pattern["improvement_briefed_for"] = e["version"]
         store.save_pattern(pattern)
         try:
             b = write_brief(e["pattern_key"], improve={**e, "failures": item["failures"]})
         except (LookupError, OSError) as ex:
             log(f"  improvement brief for {e['name']} failed: {ex}")
             continue
+        pattern = store.load_pattern(e["pattern_key"]) or pattern
+        pattern["improvement_briefed_for"] = e["version"]   # only once it worked, so a failure is retried
+        store.save_pattern(pattern)
         done.append(b["brief"])
         log(f"  {e['name']} v{e['version']} needed correcting ({item['accuracy']:.0%} accurate): improvement brief "
             f"-> {b['path']} (to be built with skill-creator)")

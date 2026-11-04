@@ -19,7 +19,6 @@ from __future__ import annotations
 
 import argparse
 import hashlib
-import json
 import os
 import shutil
 import subprocess
@@ -86,8 +85,8 @@ def relink_skills() -> list[str]:
             link.unlink()  # dangling (e.g. the repo moved)
         elif link.exists() and not ours:
             continue       # someone else's folder of that name; leave it
-        if ours and link.is_symlink():
-            continue
+        if ours:
+            continue       # linked already (a Windows copy is refreshed by install() on each new version)
         _link_skill(dest, link)
         if e.get("symlink") != str(link):
             e["symlink"] = str(link)

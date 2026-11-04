@@ -14,10 +14,8 @@ from __future__ import annotations
 import json
 import re
 import secrets
-from pathlib import Path
 
 from harness_lib import store
-from harness_lib import tools as rt
 from harness_lib.claude_cli import ClaudeError, run_structured
 from harness_lib.schema_check import validate
 from registry import install as reg

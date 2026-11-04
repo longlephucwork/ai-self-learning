@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """Stand-in for `claude -p` in tests. Logs how it was called and returns canned structured output."""
-import json, os, re, sys
+import json
+import os
+import re
+import sys
 
 args = sys.argv[1:]
 prompt = sys.stdin.read()

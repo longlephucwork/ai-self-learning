@@ -114,7 +114,7 @@ class Phase4(unittest.TestCase):
         self.assertEqual(rc, 1)                                             # already installed
 
     def test_tampering_after_validation_blocks_install(self):
-        r = self.draft(proposal())
+        self.draft(proposal())
         f = self.repo / "generated" / "csv-to-json" / "files" / "csv_to_json.py"
         f.write_text("import socket\n" + f.read_text())
         rc, out = self.cli("approve", "csv-to-json", "--yes")
