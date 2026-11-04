@@ -90,6 +90,32 @@ class Phase2(unittest.TestCase):
             self.assertEqual(c["disable"], "1")
             self.assertNotEqual(Path(c["cwd"]).resolve(), ROOT)
 
+    def test_harness_calls_are_windows_safe_and_never_fire_user_hooks(self):
+        self.summarize_all()
+        for c in self.calls():
+            a = c["args"]
+            self.assertNotIn("--system-prompt", a)                          # instructions go in a file...
+            self.assertIn("You summarize logged Claude Code sessions", c["system"])
+            self.assertTrue(all("\n" not in x for x in a), "no line breaks on the command line (cmd.exe cuts them)")
+            self.assertEqual(c["settings"], {"disableAllHooks": True})     # user/plugin hooks never fire inside
+            self.assertIn("--strict-mcp-config", a)
+
+    def test_npm_shim_is_bypassed_on_windows(self):
+        from harness_lib import claude_cli
+        d = Path(self.tmp.name) / "npm"
+        (d / "node_modules" / "@anthropic-ai" / "claude-code").mkdir(parents=True)
+        (d / "node_modules" / "@anthropic-ai" / "claude-code" / "cli.js").write_text("//")
+        (d / "node.exe").write_text("")
+        shim = d / "claude.cmd"   # npm's cmd-shim layout (forward slashes so this also runs on Linux)
+        shim.write_text('@ECHO off\r\nIF EXIST "%dp0%/node.exe" (\r\n  SET "_prog=%dp0%/node.exe"\r\n)\r\n'
+                        'endLocal & goto #_undefined_# 2>NUL || title %COMSPEC% & "%_prog%"  '
+                        '"%dp0%/node_modules/@anthropic-ai/claude-code/cli.js" %*\r\n')
+        node, script = claude_cli._node_command_from_shim(str(shim))
+        self.assertEqual(Path(node), d / "node.exe")
+        self.assertEqual(Path(script), d / "node_modules" / "@anthropic-ai" / "claude-code" / "cli.js")
+        (d / "other.cmd").write_text("@echo off\r\nsomething.exe %*\r\n")
+        self.assertIsNone(claude_cli._node_command_from_shim(str(d / "other.cmd")))   # unknown shim: keep it
+
     def test_family_clustering_rules(self):
         from detect import cluster as cl
         self.summarize_all()

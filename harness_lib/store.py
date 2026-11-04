@@ -110,12 +110,12 @@ def write_json_atomic(path: Path, obj) -> None:
 
 def _replace(src: str, dst: Path) -> None:
     """os.replace, retried briefly: on Windows it fails while another process has dst open."""
-    for i in range(50):
+    for i in range(250):  # up to ~5 s: another process may be reading the file
         try:
             os.replace(src, dst)
             return
         except PermissionError:
-            if os.name != "nt" or i == 49:
+            if os.name != "nt" or i == 249:
                 raise
             time.sleep(0.02)
 
@@ -143,10 +143,18 @@ def read_jsonl(path: Path) -> list[dict]:
 
 
 def read_json(path: Path):
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except (FileNotFoundError, json.JSONDecodeError):
-        return None
+    """The parsed file, or None if it's missing or unreadable. On Windows a file can't be read at the moment
+    another process replaces it, so a PermissionError is retried briefly instead of crashing the caller."""
+    for i in range(100):
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except (FileNotFoundError, json.JSONDecodeError):
+            return None
+        except PermissionError:
+            if os.name != "nt" or i == 99:
+                return None
+            time.sleep(0.02)
+    return None
 
 
 @contextmanager

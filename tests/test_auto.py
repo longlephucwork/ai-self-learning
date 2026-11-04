@@ -118,6 +118,37 @@ class Auto(unittest.TestCase):
         self.auto.set_config(monthly_budget_usd=0.0)
         self.assertIn("budget", self.auto.should_run()[1])
 
+    def test_failed_run_does_not_use_up_the_daily_window(self):
+        self.auto.set_config(enabled=True)
+        self.add_sessions()
+        os.environ["FAKE_CLAUDE_FAIL"] = "1"
+        r = self.auto.run()
+        st = self.auto.state()
+        self.assertIn("last_error", st)
+        self.assertNotIn("last_run_at", st)
+        ok, why = self.auto.should_run()
+        self.assertFalse(ok); self.assertIn("the last run failed", why)
+        later = datetime.now(timezone.utc) + timedelta(hours=1, minutes=1)
+        self.assertTrue(self.auto.should_run(now=later)[0])               # retried after an hour, not 24 h
+        os.environ.pop("FAKE_CLAUDE_FAIL")
+        r = self.auto.run(force=True)
+        self.assertNotIn("last_error", self.auto.state())
+        self.assertIn("last_run_at", self.auto.state())
+
+    def test_reads_survive_windows_file_locks(self):
+        from harness_lib import store
+        p = self.t / "x.json"; p.write_text('{"a": 1}')
+        real, n = Path.read_text, []
+
+        def flaky(self_, *a, **k):
+            n.append(1)
+            if len(n) < 3:
+                raise PermissionError(13, "being used by another process")
+            return real(self_, *a, **k)
+        with mock.patch.object(Path, "read_text", flaky), mock.patch.object(store.os, "name", "nt"):
+            self.assertEqual(store.read_json(p), {"a": 1})
+        self.assertEqual(len(n), 3)
+
     def test_stale_lock_is_replaced(self):
         self.store.store_dir()
         self.auto._lock_path().write_text(json.dumps({"pid": 1, "t": time.time() - 3 * 3600}))

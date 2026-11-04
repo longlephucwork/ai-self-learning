@@ -395,7 +395,11 @@ def main(argv=None):
         ok, why = auto.should_run()
         print(f"next run: {'due now' if ok else why}")
         lr = st.get("last_result") or {}
-        print(f"last run: {st.get('last_run_at', 'never')}" + (f" (spent ${lr.get('spent_usd', 0):.3f})" if lr else ""))
+        print(f"last successful run: {st.get('last_run_at', 'never')}")
+        if st.get("last_error"):
+            print(f"last attempt FAILED at {st.get('last_attempt_at')}: {st['last_error'][:200]}  (details: store/auto.log)")
+        elif lr:
+            print(f"last run spent ${lr.get('spent_usd', 0):.3f}")
         for i in auto.inbox():
             print(f"waiting for you: {i['type']} {i['draft']}  ->  python3 review/cli.py review {i['draft']}")
         return 0

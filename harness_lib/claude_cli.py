@@ -53,6 +53,36 @@ def _record_spend(cost: float, model: str) -> None:
         pass  # accounting must never break a run
 
 
+def resolve_claude() -> list[str]:
+    """The command that starts Claude Code, avoiding cmd.exe on Windows.
+
+    An npm install on Windows puts a `claude.cmd` shim on PATH. Running a .cmd goes through cmd.exe, which
+    mangles arguments containing quotes, line breaks or & | < > ^ %. So when the shim points at a node script,
+    run `node <script>` directly instead."""
+    found = shutil.which("claude") or "claude"
+    if os.name != "nt" or not found.lower().endswith((".cmd", ".bat")):
+        return [found]
+    return _node_command_from_shim(found) or [found]
+
+
+def _node_command_from_shim(shim: str) -> list[str] | None:
+    import re
+    try:
+        text = open(shim, encoding="utf-8", errors="replace").read()
+    except OSError:
+        return None
+    m = re.search(r'"(%~?dp0%?[^"]*?\.(?:c?js|mjs))"', text, re.I)
+    if not m:
+        return None
+    base = os.path.dirname(os.path.abspath(shim))
+    script = os.path.normpath(re.sub(r"(?i)%~?dp0%?", lambda _: base + os.sep, m.group(1)))
+    if not os.path.isfile(script):
+        return None
+    local_node = os.path.join(base, "node.exe")
+    node = local_node if os.path.isfile(local_node) else shutil.which("node")
+    return [node, script] if node else None
+
+
 def run_structured(prompt: str, schema: dict, *, system: str, model: str | None = None,
                    max_budget_usd: float = 0.50, timeout: int = 300) -> tuple[dict, float]:
     """Return (structured_output, cost_usd). Every call's cost is appended to store/spend.jsonl."""
@@ -67,18 +97,29 @@ def run_structured(prompt: str, schema: dict, *, system: str, model: str | None 
     elif override:
         exe = shlex.split(override, posix=os.name != "nt")
     else:
-        exe = [shutil.which("claude") or "claude"]
-    cmd = exe + [
-        "-p", "--output-format", "json",
-        "--tools", "",
-        "--no-session-persistence",
-        "--json-schema", json.dumps(schema),
-        "--system-prompt", system,
-        "--model", model or DEFAULT_MODEL,
-        "--max-budget-usd", str(max_budget_usd),
-    ]
+        exe = resolve_claude()
     env = {**os.environ, "LEARNING_HARNESS_DISABLE": "1"}
     with tempfile.TemporaryDirectory(prefix="lh-claude-") as cwd:
+        # Long or multi-line text goes in files, never on the command line (Windows cmd.exe cuts arguments at
+        # the first line break). The harness's own calls run with every hook and MCP server off, so the user's
+        # hooks and plugins never fire inside them.
+        sys_file = os.path.join(cwd, "system.txt")
+        settings_file = os.path.join(cwd, "settings.json")
+        with open(sys_file, "w", encoding="utf-8") as fh:
+            fh.write(system)
+        with open(settings_file, "w", encoding="utf-8") as fh:
+            json.dump({"disableAllHooks": True}, fh)
+        cmd = exe + [
+            "-p", "--output-format", "json",
+            "--tools", "",
+            "--no-session-persistence",
+            "--settings", settings_file,
+            "--strict-mcp-config",
+            "--json-schema", json.dumps(schema, separators=(",", ":")),
+            "--system-prompt-file", sys_file,
+            "--model", model or DEFAULT_MODEL,
+            "--max-budget-usd", str(max_budget_usd),
+        ]
         try:
             p = subprocess.run(cmd, input=prompt, capture_output=True, text=True, encoding="utf-8", errors="replace", env=env,
                                cwd=cwd, timeout=timeout)

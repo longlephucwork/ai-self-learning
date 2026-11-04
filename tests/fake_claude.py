@@ -8,8 +8,15 @@ schema = json.loads(args[args.index("--json-schema") + 1])
 log = os.environ.get("FAKE_CLAUDE_LOG")
 if log:
     with open(log, "a") as fh:
-        fh.write(json.dumps({"args": args, "cwd": os.getcwd(),
-                             "disable": os.environ.get("LEARNING_HARNESS_DISABLE")}) + "\n")
+        rec = {"args": args, "cwd": os.getcwd(), "disable": os.environ.get("LEARNING_HARNESS_DISABLE")}
+        if "--system-prompt-file" in args:
+            rec["system"] = open(args[args.index("--system-prompt-file") + 1], encoding="utf-8").read()
+        if "--settings" in args:
+            rec["settings"] = json.load(open(args[args.index("--settings") + 1], encoding="utf-8"))
+        fh.write(json.dumps(rec) + "\n")
+if os.environ.get("FAKE_CLAUDE_FAIL"):
+    print(json.dumps({"type": "result", "is_error": False, "total_cost_usd": 0.0}))  # no structured_output
+    sys.exit(0)
 
 if "confidence" in schema["properties"]:  # refine/auto.py inferred ratings
     out = {"outcome": "accepted", "confidence": float(os.environ.get("FAKE_RATE_CONF", "0.7")), "note": "",

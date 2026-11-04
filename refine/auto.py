@@ -37,6 +37,7 @@ DEFAULTS = {"enabled": False, "monthly_budget_usd": 5.0, "min_hours_between_runs
             "max_drafts_per_run": 1, "retry_days": 7, "min_confidence": 0.6, "min_success": 3,
             "promote_min_uses": 5, "promote_min_accuracy": 0.9, "promote_min_mechanical": 0.75}
 LOCK_STALE_S = 2 * 3600
+RETRY_AFTER_FAILURE = timedelta(hours=1)
 _children: list = []   # keep spawned runs referenced, so their handles aren't collected while they run
 
 
@@ -98,6 +99,10 @@ def should_run(now: datetime | None = None) -> tuple[bool, str]:
         return False, "automatic learning is off (install.py, or set auto.enabled in store/config.json)"
     if month_spend() >= cfg["monthly_budget_usd"]:
         return False, f"monthly budget of ${cfg['monthly_budget_usd']:.2f} reached"
+    attempt = _ts(st.get("last_attempt_at")) if st.get("last_attempt_at") else None
+    if st.get("last_error") and attempt and now - attempt < RETRY_AFTER_FAILURE:
+        return False, (f"the last run failed ({st['last_error'][:120]}); retrying after "
+                       f"{(attempt + RETRY_AFTER_FAILURE).isoformat(timespec='minutes')}")
     last = _ts(st.get("last_run_at")) if st.get("last_run_at") else None
     if last and now - last < timedelta(hours=cfg["min_hours_between_runs"]):
         return False, f"last run {last.isoformat(timespec='minutes')}; waiting {cfg['min_hours_between_runs']}h"
@@ -303,14 +308,22 @@ def run(*, force: bool = False) -> dict:
             left -= 1
         result["drafted"] = drafted
     except Exception as e:  # a background run must never leave the lock behind
+        import traceback
         result["error"] = repr(e)[:300]
-        log(f"auto run crashed: {e!r}")
+        log(f"auto run crashed: {e!r}\n{traceback.format_exc()}")
     finally:
         result["spent_usd"] = round(month_spend() - spend0, 4)
-        store.write_json_atomic(store.store_dir() / "auto_state.json",
-                                {**state(), "last_run_at": started, "last_result": result})
+        r = result.get("ratings") or {}
+        broken = bool(result.get("error")) or (r.get("failed", 0) > 0 and not r.get("rated") and not r.get("unknown"))
+        st = {**state(), "last_attempt_at": started, "last_result": result}
+        if broken:   # a failed run doesn't use up the daily window: it's retried after RETRY_AFTER_FAILURE
+            st["last_error"] = result.get("error") or "every model call failed (see store/auto.log)"
+        else:
+            st["last_run_at"] = started
+            st.pop("last_error", None)
+        store.write_json_atomic(store.store_dir() / "auto_state.json", st)
         _release()
-        log(f"auto run finished; spent ${result['spent_usd']:.3f}")
+        log(f"auto run {'FAILED' if broken else 'finished'}; spent ${result['spent_usd']:.3f}")
     return result
 
 
@@ -320,7 +333,9 @@ def spawn_in_background() -> bool:
     logf = open(store.store_dir() / "auto.log", "a", encoding="utf-8")
     kw = {"stdin": subprocess.DEVNULL, "stdout": logf, "stderr": logf, "cwd": str(store.REPO_ROOT)}
     if os.name == "nt":
-        kw["creationflags"] = 0x00000008 | 0x00000200  # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
+        # CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP: hidden, but with a console, which the claude/node/bash
+        # processes it starts need (a fully DETACHED_PROCESS breaks them)
+        kw["creationflags"] = 0x08000000 | 0x00000200
     else:
         kw["start_new_session"] = True
     env = {k: v for k, v in os.environ.items() if k != "LEARNING_HARNESS_DISABLE"}

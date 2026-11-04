@@ -121,7 +121,9 @@ def spawn_check_in_background() -> None:
     logf = open(store.store_dir() / "update.log", "a", encoding="utf-8")
     kw = {"stdin": subprocess.DEVNULL, "stdout": logf, "stderr": logf, "cwd": str(store.REPO_ROOT)}
     if os.name == "nt":
-        kw["creationflags"] = 0x00000008 | 0x00000200  # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
+        # CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP: hidden, but with a console, which the claude/node/bash
+        # processes it starts need (a fully DETACHED_PROCESS breaks them)
+        kw["creationflags"] = 0x08000000 | 0x00000200
     else:
         kw["start_new_session"] = True
     _children.append(subprocess.Popen([sys.executable, str(store.REPO_ROOT / "install.py"), "--check-update"],
