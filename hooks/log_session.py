@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import argparse
 import gzip
+import hashlib
 import json
 import os
 import sys
@@ -43,24 +44,96 @@ def _strip(obj):
     return obj
 
 
-def copy_transcript(src: str, session_id: str) -> str:
-    """Write a redacted, gzipped copy of the transcript into the session's folder."""
-    dst = store.session_dir(session_id, create=True) / "transcript.jsonl.gz"
-    # unique temp name: Stop and SessionEnd can ingest the same session concurrently
-    fd, tmp = tempfile.mkstemp(dir=dst.parent, prefix=".transcript.", suffix=".tmp")
-    os.close(fd)
-    os.chmod(tmp, store.FILE_MODE)
-    with open(src, encoding="utf-8", errors="replace") as fin, gzip.open(tmp, "wt", encoding="utf-8") as fout:
-        for line in fin:
-            line = line.strip()
-            if not line:
-                continue
+COPY_STATE = ".transcript.state.json"  # how far the source has been copied (dot file: bookkeeping, not data)
+COPY_STATE_VERSION = 1
+TAIL_BYTES = 4096                      # bytes before the offset that must be unchanged to trust it
+
+
+def _redacted(raw: bytes) -> str | None:
+    """One transcript line, redacted and re-serialised; None for blank or unparseable lines."""
+    line = raw.decode("utf-8", errors="replace").strip()
+    if not line:
+        return None
+    try:
+        obj = json.loads(line)
+    except json.JSONDecodeError:
+        return None
+    return json.dumps(redact_obj(_strip(obj)), ensure_ascii=False) + "\n"
+
+
+def _copy_lines(fin, start: int, write) -> int:
+    """write() each complete line from `start`, redacted; return the offset just past the last one consumed.
+
+    A last line without a newline is taken only if it's whole JSON (a transcript line that's still being
+    written isn't), so a half-written line is left for the next run instead of being lost."""
+    fin.seek(start)
+    pos = start
+    for raw in fin:
+        if not raw.endswith(b"\n"):
             try:
-                obj = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            fout.write(json.dumps(redact_obj(_strip(obj)), ensure_ascii=False) + "\n")
-    store._replace(tmp, dst)  # retried on Windows while another process has the file open
+                json.loads(raw)
+            except ValueError:
+                break
+        pos += len(raw)
+        r = _redacted(raw)
+        if r:
+            write(r)
+    return pos
+
+
+def _tail_hash(fin, offset: int) -> str:
+    fin.seek(max(0, offset - TAIL_BYTES))
+    return hashlib.sha256(fin.read(offset - max(0, offset - TAIL_BYTES))).hexdigest()
+
+
+def copy_transcript(src: str, session_id: str, *, full: bool = False) -> str:
+    """Keep a redacted, gzipped copy of the transcript in the session's folder, append-only.
+
+    Each run redacts only the lines added since the last run and appends them as a new gzip member
+    (gzip readers read multi-member files as one stream). The copy is rebuilt from the start instead when
+    `full` is set or the saved position can't be trusted: no state yet, a different source file, the source
+    shorter than the offset or changed just before it, or the copy not the size the last run left it."""
+    d = store.session_dir(session_id, create=True)
+    dst = d / "transcript.jsonl.gz"
+    state_path = d / COPY_STATE
+    source = os.path.abspath(src)
+    with store._locked(d), open(src, "rb") as fin:  # Stop and SessionEnd can ingest a session concurrently
+        st = store.read_json(state_path) or {}
+        size = os.fstat(fin.fileno()).st_size
+        offset = st.get("offset", 0)
+        append = (not full and st.get("version") == COPY_STATE_VERSION and st.get("source") == source
+                  and 0 < offset <= size and dst.is_file() and dst.stat().st_size == st.get("copy_size")
+                  and _tail_hash(fin, offset) == st.get("tail_hash"))
+        if append:
+            if offset == size:
+                return str(dst)  # nothing new since the last run
+            out: list[str] = []
+            end = _copy_lines(fin, offset, out.append)
+            if out:
+                # a whole gzip member in one O_APPEND write. If it's torn, the copy's size no longer matches
+                # the state, so the next run rebuilds it.
+                data = gzip.compress("".join(out).encode("utf-8"))
+                fd = os.open(dst, os.O_WRONLY | os.O_APPEND | getattr(os, "O_BINARY", 0))
+                try:
+                    os.write(fd, data)
+                finally:
+                    os.close(fd)
+        else:
+            fd, tmp = tempfile.mkstemp(dir=d, prefix=".transcript.", suffix=".tmp")
+            os.close(fd)
+            os.chmod(tmp, store.FILE_MODE)
+            try:
+                with gzip.open(tmp, "wt", encoding="utf-8") as fout:
+                    end = _copy_lines(fin, 0, fout.write)
+                store._replace(tmp, dst)  # retried on Windows while another process has the file open
+            except BaseException:
+                try:
+                    os.unlink(tmp)
+                except FileNotFoundError:
+                    pass
+                raise
+        store.write_json_atomic(state_path, {"version": COPY_STATE_VERSION, "source": source, "offset": end,
+                                             "tail_hash": _tail_hash(fin, end), "copy_size": dst.stat().st_size})
     return str(dst)
 
 

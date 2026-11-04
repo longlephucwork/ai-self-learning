@@ -152,14 +152,85 @@ class Phase1(unittest.TestCase):
             def __getattr__(self, attr):
                 return getattr(os, attr)
         with mock.patch.object(store, "os", WindowsOs()):
-            log_session.copy_transcript(str(FIX), "test-sess-1")
-        self.assertEqual(len(calls), 3)
+            log_session.copy_transcript(str(FIX), "test-sess-1", full=True)  # a full rebuild replaces the file
+        self.assertEqual(len(calls), 4)   # the copy: 2 failures + 1 success; then its position file: 1
         calls.clear()
         target = Path(self.tmp.name) / "x.json"   # build paths before faking os.name (pathlib checks it)
         with mock.patch.object(store.os, "replace", flaky), mock.patch.object(store.os, "name", "nt"):
             store.write_json_atomic(target, {"a": 1})
         self.assertEqual(len(calls), 3)
         self.assertEqual(store.read_json(Path(self.tmp.name) / "x.json"), {"a": 1})
+
+    # ---------------- append-only transcript copy ----------------
+
+    @staticmethod
+    def _read_copy(sid):
+        from harness_lib import store
+        return gzip.open(store.session_dir(sid) / "transcript.jsonl.gz", "rt").read()
+
+    def _copy(self, src, sid="inc"):
+        from hooks import log_session
+        log_session.copy_transcript(str(src), sid)
+        return self._read_copy(sid)
+
+    def _full(self, src):
+        from hooks import log_session
+        log_session.copy_transcript(str(src), "full-ref", full=True)
+        return self._read_copy("full-ref")
+
+    def test_copy_appends_only_new_lines(self):
+        from unittest import mock
+
+        from harness_lib import store
+        from hooks import log_session
+        lines = FIX.read_bytes().splitlines(keepends=True)
+        src = Path(self.tmp.name) / "live.jsonl"
+        src.write_bytes(b"".join(lines[:5]))
+        self._copy(src)
+        with open(src, "ab") as fh:
+            fh.write(b"".join(lines[5:]))
+        with mock.patch.object(log_session.gzip, "open", side_effect=AssertionError("rebuilt")), \
+                mock.patch.object(log_session, "_redacted", wraps=log_session._redacted) as red:
+            log_session.copy_transcript(str(src), "inc")                     # appends: no rebuild
+        got = self._read_copy("inc")
+        self.assertEqual(red.call_count, len(lines) - 5)                     # only the new lines were redacted
+        self.assertEqual(got, self._full(src))                               # same as copying it all at once
+        self.assertNotIn("sk-ant-api03", got)
+        size = (store.session_dir("inc") / "transcript.jsonl.gz").stat().st_size
+        with mock.patch.object(log_session, "_redacted", side_effect=AssertionError("re-read")):
+            self._copy(src)                                                  # nothing new: no work at all
+        self.assertEqual((store.session_dir("inc") / "transcript.jsonl.gz").stat().st_size, size)
+
+    def test_copy_waits_for_a_half_written_line(self):
+        lines = FIX.read_bytes().splitlines(keepends=True)
+        src = Path(self.tmp.name) / "live.jsonl"
+        half = len(lines[6]) // 2
+        src.write_bytes(b"".join(lines[:6]) + lines[6][:half])
+        self._copy(src)
+        with open(src, "ab") as fh:
+            fh.write(lines[6][half:] + b"".join(lines[7:]))
+        self.assertEqual(self._copy(src), self._full(src))                   # the torn line isn't lost
+
+    def test_copy_rebuilds_when_it_cant_trust_the_offset(self):
+        from harness_lib import store
+        lines = FIX.read_bytes().splitlines(keepends=True)
+        src = Path(self.tmp.name) / "live.jsonl"
+        src.write_bytes(b"".join(lines))
+        self._copy(src)
+        src.write_bytes(b"".join(lines[:4]))                                 # source got shorter
+        self.assertEqual(self._copy(src), self._full(src))
+        self._copy(src)
+        src.write_bytes(b"".join(reversed(lines[:4])) + b"".join(lines[4:]))  # same size or more, earlier bytes changed
+        self.assertEqual(self._copy(src), self._full(src))
+        dst = store.session_dir("inc") / "transcript.jsonl.gz"
+        with open(dst, "ab") as fh:
+            fh.write(b"torn")                                                # copy isn't what the last run left
+        with open(src, "ab") as fh:
+            fh.write(lines[0])
+        self.assertEqual(self._copy(src), self._full(src))
+        other = Path(self.tmp.name) / "other.jsonl"
+        other.write_bytes(b"".join(lines[:3]))
+        self.assertEqual(self._copy(other), self._full(other))               # a different source file
 
     def test_stop_hook_active_skipped(self):
         from harness_lib import store

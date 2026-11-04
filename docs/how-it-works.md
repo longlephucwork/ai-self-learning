@@ -28,7 +28,8 @@ So pushing or publishing a release never includes anything learned on your machi
 store/                                 # git-ignored: personal session data
   sessions/<session_id>/
     session.json         # metadata, requests, tool steps, files touched, final result
-    transcript.jsonl.gz  # redacted copy of the full transcript
+    transcript.jsonl.gz  # redacted copy of the full transcript, appended to as the session grows
+    .transcript.state.json  # how far the source transcript has been copied
     ratings.jsonl        # append-only outcome history: your latest rating wins, else the latest inferred one
     summary.json         # Phase 2 structured summary (written only by detect/)
   hook_events.jsonl      # append-only log of Stop / SessionEnd / backfill events
@@ -37,7 +38,7 @@ store/                                 # git-ignored: personal session data
 Only the hook writes `session.json`, and only `review/cli.py rate` and the automatic rater append to `ratings.jsonl`, so they never race. `session.json` is updated under a per-session `flock` and replaced by atomic rename. Appends to the JSONL files use one `O_APPEND` write per line. Everything can be read with `cat`, `jq` or an editor.
 
 ### Hook design (checked against the Claude Code hooks docs, Nov 2026)
-- **Stop** fires after every turn and ingests the whole session again (idempotent). Data survives even when a session is killed without a clean exit, which is common in cloud containers. It takes `last_assistant_message` from the payload because the docs say the transcript may lag at Stop time. It skips when `stop_hook_active` is true.
+- **Stop** fires after every turn and ingests the session again (idempotent). The transcript copy is append-only: only lines added since the last run are redacted and appended, as a new gzip member. If the saved position can't be trusted (the source got shorter or changed before that point, or the copy isn't the size the last run left), the copy is rebuilt from the start. Data survives even when a session is killed without a clean exit, which is common in cloud containers. It takes `last_assistant_message` from the payload because the docs say the transcript may lag at Stop time. It skips when `stop_hook_active` is true.
 - **UserPromptSubmit** compares your prompt with the first request of earlier sessions (word overlap, local, no model call; `harness_lib/similar.py`). On a repeat it tells Claude to offer learning the task once it's done. See *Learning while you work* below.
 - **SessionEnd** records `ended_at` and `reason` (`clear|resume|logout|prompt_input_exit|other`). SessionEnd can't block, and its default budget is 1.5s, so the hook sets `timeout: 30`.
 - The hook always exits 0. Errors go to `store/hook_errors.log`.
