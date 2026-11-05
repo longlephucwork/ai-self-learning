@@ -17,6 +17,22 @@ irm https://raw.githubusercontent.com/longlephucwork/claude-learning-harness/mai
 
 The installer clones the repo to `~/claude-learning-harness`, checks your machine, shows what it will set up and asks once: `Install? [Y/n]`. (Use `--custom` to choose each part.) Per-OS notes (including Docker, and Ubuntu 24.04's sandbox setting) are in [docs/testing-installs.md](docs/testing-installs.md).
 
+**Set the budget and schedule while installing.** Options go to `install.py`. With `curl | bash`, put them after `bash -s --`:
+
+```bash
+# Linux / macOS / WSL
+curl -fsSL https://raw.githubusercontent.com/longlephucwork/claude-learning-harness/main/install.sh | bash -s -- --budget 10 --every 12h --after-sessions 2 --learn-after 2
+```
+
+`irm … | iex` can't pass options, so on Windows run the script as a script block instead:
+
+```powershell
+# Windows (PowerShell)
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/longlephucwork/claude-learning-harness/main/install.ps1))) --budget 10 --every 12h --after-sessions 2 --learn-after 2
+```
+
+From a clone, run `python3 install.py --budget 10 --every 12h` (or `install.ps1` with the same options). What the options mean is under [Budget and schedule](#budget-and-schedule). A bad value is rejected before anything changes, and re-running the installer without them keeps what you set before. To change them later, use `refine.py auto-config`.
+
 ## Use
 
 Use Claude Code as usual. The loop:
