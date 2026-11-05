@@ -413,7 +413,7 @@ def builtin_skill_text() -> str:
     py, repo = python_exe(), REPO.as_posix()
     return f"""---
 name: learning-harness
-description: Use the user's local learning harness. Use when the user says "learn this", "learn just the release part", "remember how to do this", "make this a skill/script/tool", "turn this into muscle memory", or asks what the harness has learned, drafted or is waiting on.
+description: Use the user's local learning harness. Use when the user says "learn this", "learn just the release part", "remember how to do this", "make this a skill/script/tool", "turn this into muscle memory", asks what the harness has learned, drafted or is waiting on, or wants to change its budget or how often it learns.
 ---
 
 # Learning harness
@@ -458,6 +458,15 @@ If `learn` says the session was rated `redone`, or that it's already learned, te
 - What has been learned, and how practised it is: `{py} {repo}/refine/refine.py report`
 - Turn a well-practised skill into a tool (muscle memory): `{py} {repo}/refine/refine.py promote <skill>`; add `--as script` for a script instead
 - Automatic learning status and budget: `{py} {repo}/refine/refine.py auto-status`
+
+## Changing how automatic learning runs
+
+When the user asks to change the budget, how often background learning runs, or how many sessions or
+repeats it waits for, run `{py} {repo}/refine/refine.py auto-config` with only what they asked for:
+`--budget 10` (USD per month), `--every 12h` (or 90m, 1d), `--after-sessions 2` (finished sessions before
+a run), `--learn-after 1` (successful repeats before a task is learned), `--max-drafts 2`, `--on` / `--off`,
+or `--reset every` (back to the default; `--reset all` for everything). With no options it shows the
+current settings. Tell the user what changed. A larger budget, more drafts or `--learn-after 1` cost more.
 """
 
 
@@ -597,16 +606,31 @@ def auto_enabled() -> bool:
     return bool(auto_config().get("enabled"))
 
 
-def setup_auto(enable: bool, budget: float | None = None) -> None:
+AUTO_FLAGS = ("budget", "every", "after_sessions", "learn_after")   # install.py options -> refine.auto.SETTINGS
+
+
+def auto_choices(a) -> dict:
+    """The automatic-learning settings given on the command line, validated (ValueError on a bad one)."""
     sys.path.insert(0, str(REPO))
     from refine import auto
-    values = {"enabled": enable}
-    if budget is not None:
-        values["monthly_budget_usd"] = float(budget)
-    cfg = auto.set_config(**values)
+    out = {}
+    for f in AUTO_FLAGS:
+        v = getattr(a, f, None)
+        if v is not None:
+            auto._coerce(f.replace("_", "-"), v)
+            out[f] = v
+    return out
+
+
+def setup_auto(enable: bool, **settings) -> None:
+    """Turn automatic learning on or off, saving any settings chosen (names as in AUTO_FLAGS)."""
+    sys.path.insert(0, str(REPO))
+    from refine import auto
+    cfg = auto.configure(enabled=enable, **settings)
     if enable:
         ok(f"automatic learning on: drafts only, budget ${cfg['monthly_budget_usd']:.2f}/month, at most every "
-           f"{cfg['min_hours_between_runs']}h after {cfg['min_new_sessions']}+ new sessions")
+           f"{auto._hours_text(cfg['min_hours_between_runs'])} after {cfg['min_new_sessions']}+ new sessions; "
+           f"change with: python3 refine/refine.py auto-config")
     else:
         ok("automatic learning off (run `python3 refine/refine.py cycle` yourself)")
 
@@ -685,7 +709,8 @@ def simple_install(a, ui: UI) -> int:
         say("\nThe self-test failed, so nothing was changed. Run again with --skip-tests to install anyway.")
         return 1
 
-    budget = a.budget if a.budget is not None else auto_config().get("monthly_budget_usd", 5.0)
+    choices = auto_choices(a)
+    budget = float(a.budget) if a.budget is not None else auto_config().get("monthly_budget_usd", 5.0)
     already_allowed = sandbox.allow_unsandboxed()
     # Turning off network isolation is shown and confirmed in the summary; an unattended --yes never does it
     # by itself (it needs --allow-unsandboxed).
@@ -694,7 +719,8 @@ def simple_install(a, ui: UI) -> int:
     if not a.no_hooks:
         plan.append("log your Claude Code sessions (on this machine only, in store/)")
     if not a.no_auto and not (a.no_hooks and not hooks_installed()):
-        plan.append(f"learn in the background: every few hours, up to ${budget:.0f}/month; "
+        every = a.every or f"{auto_config().get('min_hours_between_runs', 6):g}h"
+        plan.append(f"learn in the background: at most every {every}, up to ${budget:.0f}/month; "
                     "nothing installs without your OK")
     if not a.no_learn_skill:
         plan.append('let you say "learn this" in any session')
@@ -720,7 +746,7 @@ def simple_install(a, ui: UI) -> int:
     if not a.no_hooks:
         setup_hooks()
     if not a.no_auto and not (a.no_hooks and not hooks_installed()):
-        setup_auto(enable=True, budget=budget)
+        setup_auto(enable=True, **choices)
     if not a.no_learn_skill:
         setup_builtin_skill()
     if need_sc:
@@ -768,9 +794,19 @@ def main(argv=None) -> int:
     ap.add_argument("--no-learn-skill", action="store_true", help="don't add the 'learn this' skill for Claude")
     ap.add_argument("--no-skill-creator", action="store_true", help="don't add skill-creator if it's missing")
     ap.add_argument("--budget", type=float, default=None, help="monthly budget for automatic learning (USD, default 5)")
+    ap.add_argument("--every", metavar="TIME", default=None,
+                    help="at most one background learning run per TIME: 6h, 90m, 1d (default 6h)")
+    ap.add_argument("--after-sessions", metavar="N", default=None,
+                    help="finished sessions needed before a background run (default 3)")
+    ap.add_argument("--learn-after", metavar="N", default=None,
+                    help="successful repeats before a task is learned (default 3; 1 = after one)")
     ap.add_argument("--allow-unsandboxed", action="store_true",
                     help="allow generated code/tools to run without network isolation (systems with no sandbox)")
     a = ap.parse_args(argv)
+    try:
+        auto_choices(a)
+    except ValueError as e:
+        ap.error(str(e))
     ui = UI(a.yes)
 
     if a.check_update or a.update or a.rollback:
@@ -834,7 +870,8 @@ def main(argv=None) -> int:
     elif ui.ask("Register the `learned` MCP server for all projects? (claude mcp add --scope user)"):
         setup_mcp()
     say("\n6. automatic learning")
-    budget = a.budget if a.budget is not None else auto_config().get("monthly_budget_usd", 5.0)
+    choices = auto_choices(a)
+    budget = float(a.budget) if a.budget is not None else auto_config().get("monthly_budget_usd", 5.0)
     if a.no_auto:
         say("  skipped (--no-auto)")
     elif a.no_hooks and not hooks_installed():
@@ -842,7 +879,7 @@ def main(argv=None) -> int:
     elif ui.ask(f"Learn automatically? After sessions end it rates them, finds repeated tasks and drafts\n"
                 f"  scripts/skills in the background: every few hours, drafts only (you still approve),\n"
                 f"  budget ${budget:.2f}/month. Claude tells you when a draft is ready."):
-        setup_auto(enable=True, budget=budget)
+        setup_auto(enable=True, **choices)
     else:
         setup_auto(enable=False)
     say("\n7. 'learn this'")

@@ -243,16 +243,17 @@ With automatic learning on (the installer asks; or `store/config.json` → `"aut
 3. **Detect and draft.** New sessions are summarised and grouped, then up to `max_drafts_per_run` new candidates are drafted and validated. A candidate whose draft failed is retried only after `retry_days`.
 4. **Tell you.** A `SessionStart` hook reads the validated drafts (local files only, no model call) and adds a short note to Claude's context. Claude mentions the draft once, early in your next session, and offers to show it. It only runs `review/cli.py approve` after your explicit yes. Each draft version is announced once (`store/notified.json`).
 
-**Settings** (`store/config.json`, key `auto`):
+**Settings** (`store/config.json`, key `auto`). Change them with `refine.py auto-config` (the option is in brackets), which checks the values. With no options it shows them all, and `--reset NAME` or `--reset all` brings back the defaults. The installer takes `--budget`, `--every`, `--after-sessions` and `--learn-after`.
 
 | Key | Default | Meaning |
 |---|---|---|
-| `enabled` | `false` (the installer offers `true`) | on/off |
-| `monthly_budget_usd` | `5.0` | background runs stop when this month's spend reaches it |
-| `min_hours_between_runs` | `6` | throttle |
-| `keep_days` | `90` | finished one-off sessions older than this, evidence for nothing, are deleted |
-| `min_new_sessions` | `3` | finished sessions needed since the last run |
-| `max_drafts_per_run` | `1` | caps drafting cost per run |
+| `enabled` | `false` (the installer offers `true`) | on/off (`--on`, `--off`) |
+| `monthly_budget_usd` | `5.0` | background runs stop when this month's spend reaches it (`--budget`) |
+| `min_hours_between_runs` | `6` | at most one run per this many hours (`--every`, e.g. `90m`, `12h`, `1d`) |
+| `keep_days` | `90` | finished one-off sessions older than this, evidence for nothing, are deleted (`--keep-days`) |
+| `min_new_sessions` | `3` | finished sessions needed since the last run (`--after-sessions`) |
+| `min_success` | `3` | successful sessions before a task is learned (`--learn-after`; 1 = after one) |
+| `max_drafts_per_run` | `1` | caps drafting cost per run (`--max-drafts`) |
 | `retry_days` | `7` | wait before re-drafting a candidate that failed |
 | `min_confidence` | `0.6` | below this, an inferred rating counts as `unknown` |
 
@@ -260,6 +261,7 @@ With automatic learning on (the installer asks; or `store/config.json` → `"aut
 
 ```bash
 python3 refine/refine.py auto-status     # on/off, spend vs budget, next run, drafts waiting
+python3 refine/refine.py auto-config --budget 10 --every 12h --after-sessions 2   # change settings
 python3 refine/refine.py auto --force    # run now, ignoring the throttle
 tail store/auto.log                      # what the background runs did
 ```

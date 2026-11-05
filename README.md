@@ -58,6 +58,7 @@ You can also do it all by hand. Run these from `~/claude-learning-harness` (on W
 | `python3 refine/refine.py learn --requests 7-9 --focus "..."` | learn only that part of the session |
 | `python3 refine/refine.py report` | what's learned: uses, accuracy, and what's ready to become automatic |
 | `python3 refine/refine.py auto-status` | automatic learning on/off, this month's spend, what's waiting |
+| `python3 refine/refine.py auto-config` | show or change the budget, how often it runs, and how many sessions it waits for (below) |
 | `python3 registry/install.py list` | what's installed |
 | `python3 registry/install.py uninstall <name>` | remove an installed item |
 
@@ -72,9 +73,28 @@ python3 install.py --update      # install the newest release
 python3 install.py --rollback    # go back to the previous version
 ```
 
+## Budget and schedule
+
+Background learning has a monthly budget, runs at most once per cycle, and waits for enough new sessions. Change any of it with `refine/refine.py auto-config`, or just ask Claude ("learn every 12 hours", "raise the budget to $10"):
+
+```bash
+python3 refine/refine.py auto-config --budget 10 --every 12h --after-sessions 2 --learn-after 2
+```
+
+| Option | Default | What it sets |
+|---|---|---|
+| `--budget USD` | `5` | monthly budget; background runs stop when it's spent |
+| `--every TIME` | `6h` | at most one background run per this long (`90m`, `12h`, `1d`) |
+| `--after-sessions N` | `3` | finished sessions needed since the last run |
+| `--learn-after N` | `3` | successful repeats before a task is learned (`1`: after one) |
+| `--max-drafts N` | `1` | drafts per background run |
+| `--keep-days N` | `90` | days before an old one-off session is forgotten |
+
+Run it with no options to see the current values. `--reset every` (or `--reset all`) brings back the defaults, and `--on` / `--off` switches background learning. The installer takes `--budget`, `--every`, `--after-sessions` and `--learn-after` too. A larger budget, more drafts or `--learn-after 1` mean more drafting, so more spend.
+
 ## Turn it off or remove it
 
-- Stop automatic learning: set `"enabled": false` under `"auto"` in `store/config.json`.
+- Stop automatic learning: `python3 refine/refine.py auto-config --off`.
 - Uninstall: `python3 install.py --uninstall`. This removes the hooks, the MCP server and the PATH entry, and keeps your data.
 - Stop the update check: set `"check": false` under `"update"` in `store/config.json`.
 - Status: `python3 install.py --check`.

@@ -16,6 +16,9 @@
   refine.py prune [--days N] [--dry-run]       delete old one-off sessions that are evidence for nothing
   refine.py auto [--force]                     one automatic-learning run (normally started by the SessionEnd hook)
   refine.py auto-status                        settings, budget, last run, drafts waiting
+  refine.py auto-config [--budget USD] [--every 6h] [--after-sessions N] [--learn-after N] [--max-drafts N]
+                        [--keep-days N] [--on|--off] [--reset NAME... | --reset all]
+                                               change automatic learning's settings (no options: show them)
   refine.py cycle [--generate N] [--no-detect] one maintenance pass: detect -> draft new candidates -> report
 
 Nothing here installs, uninstalls or changes an artifact. It writes reports
@@ -280,6 +283,17 @@ def main(argv=None):
     p = sub.add_parser("demote"); p.add_argument("name"); p.add_argument("--yes", action="store_true")
     p = sub.add_parser("auto"); p.add_argument("--force", action="store_true", help="ignore the throttle")
     sub.add_parser("auto-status")
+    p = sub.add_parser("auto-config", help="show or change automatic learning's settings")
+    p.add_argument("--budget", metavar="USD", help="monthly budget for background learning (default 5)")
+    p.add_argument("--every", metavar="TIME", help="at most one background run per TIME: 6h, 90m, 1d (default 6h)")
+    p.add_argument("--after-sessions", metavar="N", help="finished sessions needed since the last run (default 3)")
+    p.add_argument("--learn-after", metavar="N", help="successful repeats before a task is learned (default 3)")
+    p.add_argument("--max-drafts", metavar="N", help="drafts per background run (default 1)")
+    p.add_argument("--keep-days", metavar="N", help="days before a finished one-off session is forgotten (default 90)")
+    onoff = p.add_mutually_exclusive_group()
+    onoff.add_argument("--on", dest="enabled", action="store_const", const=True)
+    onoff.add_argument("--off", dest="enabled", action="store_const", const=False)
+    p.add_argument("--reset", nargs="+", metavar="NAME", default=[], help="back to the default: a setting name or all")
     a = ap.parse_args(argv)
     installed = reg.load_registry()["installed"]
 
@@ -432,13 +446,31 @@ def main(argv=None):
         if not r["ran"]:
             print(f"not run: {r['reason']}")
         return 0
+    elif a.cmd == "auto-config":
+        from refine import auto
+        values = {n: getattr(a, n.replace("-", "_")) for n in auto.SETTINGS}
+        changing = a.enabled is not None or a.reset or any(v is not None for v in values.values())
+        if changing:
+            try:
+                auto.configure(enabled=a.enabled, reset=a.reset, **values)
+            except ValueError as e:
+                sys.exit(f"error: {e}")
+        cfg = auto.config()
+        print(f"automatic learning: {'ON' if cfg['enabled'] else 'off'}" + ("  (saved)" if changing else ""))
+        for name, shown, meaning, default in auto.describe_settings():
+            print(f"  --{name:15} {shown:>8}  {meaning}{'' if default else '  [changed]'}")
+        if not changing:
+            print("change one with e.g.: python3 refine/refine.py auto-config --budget 10 --every 4h")
+        return 0
     elif a.cmd == "auto-status":
         from refine import auto
         from harness_lib.claude_cli import month_spend
         cfg, st = auto.config(), auto.state()
         print(f"automatic learning: {'ON' if cfg['enabled'] else 'off'}")
         print(f"budget: ${month_spend():.2f} of ${cfg['monthly_budget_usd']:.2f} used this month")
-        print(f"throttle: at most every {cfg['min_hours_between_runs']}h, after {cfg['min_new_sessions']}+ new sessions")
+        print(f"throttle: at most every {auto._hours_text(cfg['min_hours_between_runs'])}, after "
+              f"{cfg['min_new_sessions']}+ new sessions; a task is learned after {cfg['min_success']} successful repeat(s)")
+        print("change settings: python3 refine/refine.py auto-config")
         ok, why = auto.should_run()
         print(f"next run: {'due now' if ok else why}")
         lr = st.get("last_result") or {}

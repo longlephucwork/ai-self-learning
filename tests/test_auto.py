@@ -129,6 +129,87 @@ class Auto(unittest.TestCase):
         self.auto.set_config(monthly_budget_usd=0.0)
         self.assertIn("budget", self.auto.should_run()[1])
 
+    def test_settings_change_the_throttle_and_budget(self):
+        a = self.auto
+        a.configure(enabled=True, budget="12.5", every="90m", after_sessions="2", learn_after=1)
+        cfg = a.config()
+        self.assertEqual((cfg["enabled"], cfg["monthly_budget_usd"], cfg["min_hours_between_runs"],
+                          cfg["min_new_sessions"], cfg["min_success"]), (True, 12.5, 1.5, 2, 1))
+        self.add_sessions(["s-fruit"])
+        self.assertIn("waiting for 2", a.should_run()[1])                   # the session count is used
+        self.add_sessions(["s-price"])
+        self.assertTrue(a.should_run()[0])
+        recent = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
+        self.store.write_json_atomic(self.store.store_dir() / "auto_state.json", {"last_run_at": recent})
+        self.assertIn("waiting 1.5h", a.should_run()[1])                    # ... and the cycle time
+        a.configure(every="30m")
+        self.assertTrue(a.should_run()[0])
+        a.configure(reset=["every", "after-sessions"])                      # back to the defaults
+        self.assertEqual((a.config()["min_hours_between_runs"], a.config()["min_new_sessions"]), (6, 3))
+        self.assertEqual(a.config()["monthly_budget_usd"], 12.5)             # the rest stays
+        a.configure(reset=["all"])
+        self.assertEqual(a.config()["monthly_budget_usd"], 5.0)
+        self.assertTrue(a.config()["enabled"])                              # reset doesn't switch it off
+
+    def test_settings_are_validated(self):
+        a = self.auto
+        for bad in ({"every": "soon"}, {"every": "-1h"}, {"after_sessions": "0"}, {"learn_after": "1.5"},
+                    {"budget": "-1"}, {"budget": "nan"}, {"max_drafts": "x"}, {"cycle": 3}):
+            with self.assertRaises(ValueError, msg=bad):
+                a.configure(**bad)
+        with self.assertRaises(ValueError):
+            a.configure(reset=["everything"])
+        self.assertEqual(a._stored(), {})                                   # nothing half-saved
+        self.assertEqual([a.parse_hours(x) for x in ("6", "6h", "90m", "1.5 hours", "1d", 2)],
+                         [6.0, 6.0, 1.5, 1.5, 24.0, 2.0])
+
+    def test_a_chosen_value_is_never_taken_for_an_old_default(self):
+        """24h was an old installer default (dropped on read); if the user picks it, it must stay."""
+        a = self.auto
+        a.set_config(min_hours_between_runs=24)                             # what an old installer wrote
+        self.assertEqual(a.config()["min_hours_between_runs"], 6)
+        a.configure(every="1d")
+        self.assertEqual(a.config()["min_hours_between_runs"], 24)
+        a.set_config(enabled=True)                                          # other writes keep the choice
+        self.assertEqual(a.config()["min_hours_between_runs"], 24)
+        self.assertNotIn(a.USER_SET, a.config())
+        a.configure(reset=["every"])
+        self.assertEqual(a.config()["min_hours_between_runs"], 6)
+
+    def test_auto_config_command(self):
+        import io
+        from contextlib import redirect_stdout
+
+        from refine import refine
+        out = io.StringIO()
+        with redirect_stdout(out):
+            refine.main(["auto-config", "--budget", "8", "--every", "12h", "--learn-after", "2", "--on"])
+        self.assertIn("ON  (saved)", out.getvalue())
+        self.assertRegex(out.getvalue(), r"--budget +\$8\.00 .*\[changed\]")
+        self.assertRegex(out.getvalue(), r"--every +12h ")
+        self.assertRegex(out.getvalue(), r"--after-sessions +3 +finished sessions needed since the last run\n")
+        with redirect_stdout(io.StringIO()), self.assertRaises(SystemExit):
+            refine.main(["auto-config", "--every", "whenever"])
+        self.assertEqual(self.auto.config()["min_hours_between_runs"], 12)
+
+    def test_installer_passes_the_settings_on(self):
+        import argparse
+        import io
+        from contextlib import redirect_stdout
+
+        import install
+        with redirect_stdout(io.StringIO()):
+            install.setup_auto(True, **install.auto_choices(argparse.Namespace(
+                budget=3.0, every="2h", after_sessions="1", learn_after=None)))
+        cfg = self.auto.config()
+        self.assertEqual((cfg["enabled"], cfg["monthly_budget_usd"], cfg["min_hours_between_runs"],
+                          cfg["min_new_sessions"], cfg["min_success"]), (True, 3.0, 2.0, 1, 3))
+        with redirect_stdout(io.StringIO()):
+            install.setup_auto(True)                                        # re-running keeps the choices
+        self.assertEqual(self.auto.config()["monthly_budget_usd"], 3.0)
+        with self.assertRaises(ValueError):
+            install.auto_choices(argparse.Namespace(budget=None, every="soon", after_sessions=None, learn_after=None))
+
     def test_failed_run_does_not_use_up_the_daily_window(self):
         self.auto.set_config(enabled=True)
         self.add_sessions()

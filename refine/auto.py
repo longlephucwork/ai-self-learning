@@ -11,7 +11,8 @@ One run:
   4. with any drafts left in that budget, propose promotions: skills practised often and accurately on
      mechanical inputs become tools, or scripts with promote_as: "script" (refine/memory.py)
 
-Settings, in store/config.json under "auto" (defaults shown):
+Settings, in store/config.json under "auto" (defaults shown). Change them with `refine.py auto-config`
+(validated; `--reset` brings a default back) rather than by hand:
   enabled: false   monthly_budget_usd: 5.0   min_hours_between_runs: 6   min_new_sessions: 3
   max_drafts_per_run: 1   retry_days: 7   min_confidence: 0.6
   min_success: 3   (successful sessions before a task is learned; 1 = learn every task after one success)
@@ -24,7 +25,9 @@ the budget, and each call's own limit is capped at what remains.
 from __future__ import annotations
 
 import json
+import math
 import os
+import re
 import subprocess
 import sys
 import time
@@ -52,10 +55,14 @@ _children: list = []   # keep spawned runs referenced, so their handles aren't c
 OLD_DEFAULTS = {"min_hours_between_runs": 24}
 
 
+USER_SET = "_user_set"   # settings the user chose with auto-config: never mistaken for an old default
+
+
 def _stored() -> dict:
     cfg = dict((store.read_json(store.store_dir() / "config.json") or {}).get("auto", {}))
+    chosen = set(cfg.pop(USER_SET, []))
     for k, v in OLD_DEFAULTS.items():
-        if cfg.get(k) == v:
+        if cfg.get(k) == v and k not in chosen:
             cfg.pop(k)
     return cfg
 
@@ -64,13 +71,100 @@ def config() -> dict:
     return {**DEFAULTS, **_stored()}
 
 
+def _user_set() -> set[str]:
+    return set((store.read_json(store.store_dir() / "config.json") or {}).get("auto", {}).get(USER_SET, []))
+
+
 def set_config(**values) -> dict:
     """Save only the settings actually chosen, so improved defaults reach existing installs."""
     path = store.store_dir() / "config.json"
     cfg = store.read_json(path) or {}
-    cfg["auto"] = {**_stored(), **values}
+    chosen = _user_set()
+    cfg["auto"] = {**_stored(), **values, **({USER_SET: sorted(chosen)} if chosen else {})}
     store.write_json_atomic(path, cfg)
     return config()
+
+
+# ---------------- user-facing settings (refine.py auto-config, install.py) ----------------
+
+# name used on the command line -> (config key, kind, smallest allowed value, what it means)
+SETTINGS = {
+    "budget": ("monthly_budget_usd", "usd", 0.0, "monthly budget for background learning (USD)"),
+    "every": ("min_hours_between_runs", "hours", 0.0, "at most one background run per this long"),
+    "after-sessions": ("min_new_sessions", "int", 1, "finished sessions needed since the last run"),
+    "learn-after": ("min_success", "int", 1, "successful repeats before a task is learned (1 = after one)"),
+    "max-drafts": ("max_drafts_per_run", "int", 0, "drafts per background run (caps its cost)"),
+    "keep-days": ("keep_days", "int", 1, "days before a finished one-off session is forgotten"),
+}
+
+_DURATION = re.compile(r"\s*(\d+(?:\.\d+)?)\s*(m|min|mins|minutes?|h|hr|hrs|hours?|d|days?)?\s*", re.IGNORECASE)
+
+
+def parse_hours(text) -> float:
+    """'6', '6h', '90m', '1.5h' or '1d' -> hours."""
+    if isinstance(text, (int, float)):
+        return float(text)
+    m = _DURATION.fullmatch(str(text))
+    if not m:
+        raise ValueError(f"{text!r} isn't a duration; use hours (6 or 6h), minutes (90m) or days (1d)")
+    n, unit = float(m.group(1)), (m.group(2) or "h").lower()
+    return n / 60 if unit.startswith("m") else n * 24 if unit.startswith("d") else n
+
+
+def _coerce(name: str, value):
+    key, kind, low, _ = SETTINGS[name]
+    try:
+        v = parse_hours(value) if kind == "hours" else \
+            float(str(value).lstrip("$")) if kind == "usd" else int(value)
+    except (TypeError, ValueError) as e:
+        raise ValueError(f"--{name}: {e}" if kind == "hours" else f"--{name} needs a number, not {value!r}") from None
+    if math.isnan(v) or v < low:
+        raise ValueError(f"--{name} must be at least {low}")
+    return key, v
+
+
+def configure(*, enabled: bool | None = None, reset: list[str] = (), **values) -> dict:
+    """Validate and save user-chosen settings (keyword names as in SETTINGS, with - as _). Settings in
+    `reset` (SETTINGS names, or "all") go back to their defaults. Returns the resulting config."""
+    chosen = {}
+    for raw, value in values.items():
+        name = raw.replace("_", "-")
+        if name not in SETTINGS:
+            raise ValueError(f"unknown setting {raw!r}; known: {', '.join(SETTINGS)}")
+        if value is not None:
+            k, v = _coerce(name, value)
+            chosen[k] = v
+    names = list(SETTINGS) if "all" in reset else list(reset)
+    for name in names:
+        if name not in SETTINGS:
+            raise ValueError(f"can't reset {name!r}; known: {', '.join(SETTINGS)}, all")
+    if enabled is not None:
+        chosen["enabled"] = enabled
+    path = store.store_dir() / "config.json"
+    cfg = store.read_json(path) or {}
+    gone = {SETTINGS[n][0] for n in names}
+    auto_cfg = {k: v for k, v in _stored().items() if k not in gone}
+    user_set = (_user_set() - gone) | (set(chosen) - {"enabled"})
+    cfg["auto"] = {**auto_cfg, **chosen, **({USER_SET: sorted(user_set)} if user_set else {})}
+    store.write_json_atomic(path, cfg)
+    return config()
+
+
+def describe_settings() -> list[tuple[str, str, str, bool]]:
+    """(name, value as shown, meaning, is it the default) for each user-facing setting."""
+    cfg, stored = config(), _stored()
+    out = []
+    for name, (key, kind, _, meaning) in SETTINGS.items():
+        v = cfg[key]
+        shown = f"${v:.2f}" if kind == "usd" else _hours_text(v) if kind == "hours" else str(v)
+        out.append((name, shown, meaning, key not in stored or stored[key] == DEFAULTS[key]))
+    return out
+
+
+def _hours_text(h: float) -> str:
+    if h and h < 1:
+        return f"{h * 60:g}m"
+    return f"{h:g}h"
 
 
 def state() -> dict:
