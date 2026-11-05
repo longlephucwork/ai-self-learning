@@ -6,6 +6,8 @@ What changed in each version of the learning harness. The format follows
 
 ## [Unreleased]
 
+## [0.0.4] - 2026-11-05
+
 ### Added
 - **Learn just one part of a session.** Say "learn the release part" in a long session that also did other work, and only that part is learned. Claude numbers the session's requests (`refine.py learn --list`) and learns the chosen ones (`refine.py learn --requests 7-9 --focus "..."`). The part becomes its own derived session, so the summary, skill brief, test cases and drafted code come from that part only. Only the part is rated `accepted`, and the parent session is left as it was.
 
@@ -68,7 +70,8 @@ What changed in each version of the learning harness. The format follows
 - Automatic learning in the background, within a monthly budget.
 - Self-update from tagged releases: a daily check, Claude asks first, a safe merge, and rollback.
 
-[Unreleased]: https://github.com/longlephucwork/claude-learning-harness/compare/v0.0.3...HEAD
+[Unreleased]: https://github.com/longlephucwork/claude-learning-harness/compare/v0.0.4...HEAD
+[0.0.4]: https://github.com/longlephucwork/claude-learning-harness/compare/v0.0.3...v0.0.4
 [0.0.3]: https://github.com/longlephucwork/claude-learning-harness/compare/v0.0.2...v0.0.3
 [0.0.2]: https://github.com/longlephucwork/claude-learning-harness/compare/v0.0.1...v0.0.2
 [0.0.1]: https://github.com/longlephucwork/claude-learning-harness/releases/tag/v0.0.1
