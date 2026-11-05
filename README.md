@@ -30,6 +30,8 @@ If you decline, a background run (every few hours, within $5/month) still learns
 
 **Learn right away:** say **"learn this"** in any session. Claude asks before installing anything.
 
+**Learn just one part:** in a long session (update the repo, merge a PR, then release), say **"learn the release part"**. Claude picks out the requests that make up that part, and only that part is learned.
+
 **Skills are built with [skill-creator](https://github.com/anthropics/skills).** The harness never writes a skill itself. When a task needs judgment, it prepares a brief from your sessions: what you asked, what you accepted, your corrections, and ready-made test cases. Claude then offers to build the skill with skill-creator, together with you. Scripts and tools are drafted and tested by the harness. The installer adds skill-creator if Claude Code doesn't already have it.
 
 **Claude uses what it learned.** In Claude Code:
@@ -52,6 +54,8 @@ You can also do it all by hand. Run these from `~/claude-learning-harness` (on W
 | `python3 review/cli.py reject <name> --reason "..."` | drop it; that task won't be proposed again |
 | `python3 review/cli.py rate last accepted` | rate your last session yourself (`accepted`, `edited` or `redone`); this overrides the automatic rating |
 | `python3 refine/refine.py learn` | learn from your last session now (what "learn this" runs) |
+| `python3 refine/refine.py learn --list` | number the session's requests |
+| `python3 refine/refine.py learn --requests 7-9 --focus "..."` | learn only that part of the session |
 | `python3 refine/refine.py report` | what's learned: uses, accuracy, and what's ready to become automatic |
 | `python3 refine/refine.py auto-status` | automatic learning on/off, this month's spend, what's waiting |
 | `python3 registry/install.py list` | what's installed |

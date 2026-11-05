@@ -7,6 +7,8 @@
   refine.py revise <name> [--model M]          draft v(N+1) from the failures (normal review/approve applies)
   refine.py expose <script> [--model M]        draft an MCP tool that wraps an installed script (no new code)
   refine.py learn [session]                    quick learn: draft from ONE session now (default: this/last session)
+  refine.py learn --list [session]             number the session's requests, to pick a part of it
+  refine.py learn [session] --requests 7-9 [--focus TEXT]   learn only that part of the session
   refine.py confirm <pattern> --accepted ID... [--redone ID...]   record what the user said about unclear
                                                sessions; learns the task right away if it now qualifies
   refine.py promote <skill> [--as tool|script] turn a well-practised skill into a tool or script (muscle memory)
@@ -90,7 +92,7 @@ def collect_uses(entry: dict) -> list[dict]:
             uses.append({"source": "manual", "at": r["at"], "via": "manual", "session_id": None,
                          "failed": r["result"] == "fail", "detail": r.get("note") or r["result"]})
     match = _matchers(entry)
-    for s in store.iter_sessions():
+    for s in store.iter_sessions(segments=False):   # a segment would count its parent's uses again
         started = _ts(s.get("started_at"))
         if since and started and started < since - timedelta(minutes=5):
             continue
@@ -265,6 +267,9 @@ def main(argv=None):
     p.add_argument("--max-attempts", type=int, default=2)
     p = sub.add_parser("learn"); p.add_argument("session", nargs="?", help="session id or prefix (default: this one)")
     p.add_argument("--model")
+    p.add_argument("--list", action="store_true", help="number the session's requests and stop")
+    p.add_argument("--requests", metavar="N-M", help="learn only requests N..M (from --list), e.g. 7-9, 7 or 7-")
+    p.add_argument("--focus", metavar="TEXT", help="what that part does, in the user's words (with --requests)")
     p = sub.add_parser("prune"); p.add_argument("--days", type=int); p.add_argument("--dry-run", action="store_true")
     p = sub.add_parser("brief"); p.add_argument("pattern", help="pattern key to brief for skill-creator")
     p = sub.add_parser("confirm"); p.add_argument("pattern")
@@ -334,9 +339,18 @@ def main(argv=None):
         return 0 if r["passed"] else 1
     elif a.cmd == "learn":
         from harness_lib.claude_cli import ClaudeError
-        from refine.learn import LearnError, learn
+        from refine.learn import LearnError, learn, list_requests
+        if a.list:
+            try:
+                sid, listing = list_requests(a.session)
+            except (LearnError, LookupError) as e:
+                sys.exit(f"error: {e}")
+            print(f"session {sid}: learn a part with --requests N-M\n{listing}")
+            return 0
+        if a.focus and not a.requests:
+            sys.exit("error: --focus describes the part chosen with --requests")
         try:
-            r = learn(a.session, model=a.model)
+            r = learn(a.session, requests=a.requests, focus=a.focus, model=a.model)
         except (LearnError, LookupError, ValueError, ClaudeError) as e:
             sys.exit(f"error: {e}")
         if r.get("brief"):

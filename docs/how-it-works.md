@@ -296,6 +296,17 @@ Claude shows users the tag's message as the release notes. A tag made on GitHub 
 2. The session is summarised, gets its own single-session pattern, and is drafted with the normal validation: tests from its real inputs and outputs, or for a skill, a judged check against it.
 3. The draft is labelled "quick learn: one session" in `review`, and still waits for your approval.
 
+### Learning one part of a session (`refine/segment.py`)
+
+A long session often does several jobs in a row: update a repo, merge a PR, then release. To learn just one of them, say so ("learn the release part"). The built-in skill makes Claude number the session's requests with `refine.py learn --list`, pick the ones that make up that part, and run `refine.py learn --requests 86-87 --focus "release a new version"`. You can run the same commands yourself. `--requests` takes `N`, `N-M` or `N-` (to the last request).
+
+- The part becomes a **segment**: a derived session `<session_id>~r86-87` in `store/sessions/`. It holds the chosen requests and every transcript line from the first of them up to, but not including, the next request after the last.
+- It's cut from the parent's redacted transcript copy and parsed like any session. So summaries, skill briefs, eval cases, test provenance and drafting see only that part. The summary and the brief say it's part of a longer conversation, and include your `--focus` description.
+- Only the segment is rated `accepted`. The rest of the session keeps its own rating, so a session where something else went wrong can still teach its good part.
+- The parent session isn't changed, and hooks never re-ingest a segment. A session ID prefix and `last` find whole sessions, never segments.
+- Nothing is counted twice. Usage tracking, `review/cli.py stats`, automatic ratings and the background run's new-session count all skip segments. When a session and one of its own segments land in the same pattern, the session is dropped from it.
+- Old segments are pruned like any one-off session once they're no longer evidence for anything.
+
 To make the background run do this for every task, set `"min_success": 1` under `"auto"` in `store/config.json` (default 3). It drafts much more, so it costs more.
 
 ## Muscle memory (`refine/memory.py`)

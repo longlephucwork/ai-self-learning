@@ -137,6 +137,11 @@ def _evidence(sids: list[str]) -> list[str]:
         o = store.outcome(sid)
         reads, writes = session_io(sid)
         out += [f"### Session {n} ({sid[:8]}), rated `{o['outcome']}`", ""]
+        seg = rec.get("segment")
+        if seg:
+            out.append(f"- **Part of a longer conversation:** requests {seg['requests'][0]}-{seg['requests'][1]}"
+                       + (f", described by the user as \"{seg['focus'][:200]}\"" if seg.get("focus") else "")
+                       + ". Only this part is the task; its first request may refer to earlier work.")
         out += [f"- **Request:** {r['text'][:600]}" for r in rec.get("requests", [])[:3]]
         if summ.get("steps"):
             out.append("- **What was done:** " + "; ".join(summ["steps"][:8]))

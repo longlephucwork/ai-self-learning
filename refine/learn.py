@@ -5,6 +5,9 @@ Saying "learn this" counts as accepting the session: an unrated session is rated
 pattern (or the pattern it already belongs to), and drafted with the normal validation: tests from
 its real inputs and outputs, or for a skill, a judged check against it. The draft still waits for
 your approval, and its evidence is labelled as one session.
+
+With `requests` ("7-9"), only that part of the session is learned (refine/segment.py): a long session that
+updated a repo, merged a PR and then released can teach just the release. The part is rated on its own.
 """
 from __future__ import annotations
 
@@ -35,18 +38,30 @@ def _refresh(sid: str) -> None:
         ingest(tp, hook_event="learn", session_id=sid)
 
 
-def learn(session: str | None = None, *, model: str | None = None, log=print) -> dict:
+def learn(session: str | None = None, *, requests: str | None = None, focus: str | None = None,
+          model: str | None = None, log=print) -> dict:
     from detect import summarize as sm
     from detect.summarize import slugify
     from generate.propose import propose
 
     sid = resolve(session)
     _refresh(sid)
+    parent = None
+    if requests:
+        from refine.segment import SegmentError, make_segment
+        parent = sid
+        try:
+            sid = make_segment(parent, requests, focus=focus)
+        except SegmentError as e:
+            raise LearnError(str(e)) from e
+        seg = store.load_session(sid)
+        log(f"learning part of session {parent[:8]}: requests {requests} "
+            f"({seg['n_requests']} request(s), {seg['n_tool_calls']} tool step(s))")
     o = store.outcome(sid)
     if o.get("source") == "manual" and o["outcome"] == "redone":
         raise LearnError(f"session {sid[:8]} is rated `redone`; there's nothing good to learn from it")
     if not (o.get("source") == "manual" and o["outcome"] in ("accepted", "edited")):
-        store.rate(sid, "accepted", "learn this", source="manual")
+        store.rate(sid, "accepted", f"learn this: {focus}" if focus else "learn this", source="manual")
 
     summ = store.load_summary(sid)
     if not summ or summ.get("source_content_hash") != (store.load_session(sid) or {}).get("content_hash"):
@@ -61,7 +76,9 @@ def learn(session: str | None = None, *, model: str | None = None, log=print) ->
 
     from harness_lib import similar
     first = (store.load_session(sid) or {}).get("first_request") or ""
-    prior = [s for s, _ in similar.similar_sessions(first, exclude=sid) if store.outcome(s)["outcome"] != "redone"
+    prior = [s for s, _ in similar.similar_sessions(first, exclude=sid)
+             if s != parent and not s.startswith(f"{sid}{store.SEGMENT_SEP}")   # not the same conversation again
+             and store.outcome(s)["outcome"] != "redone"
              and not ((store.load_summary(s) or {}).get("summary", {}).get("injection_suspected"))]
     if prior:
         log(f"also learning from {len(prior)} earlier session(s) of the same task")
@@ -98,3 +115,13 @@ def learn(session: str | None = None, *, model: str | None = None, log=print) ->
     log(f"drafting a {pattern['suggested_type']} from session {sid[:8]} ({key}) ...")
     r = propose(key, model=model, quick=True, log=log)
     return {"session": sid, "pattern": key, **r}
+
+
+def list_requests(session: str | None = None) -> tuple[str, str]:
+    """(session id, its requests numbered for --requests), after bringing the session up to date."""
+    from refine.segment import format_requests
+    sid = resolve(session)
+    if store.is_segment(sid):
+        raise LearnError("that's a segment; list the whole session instead")
+    _refresh(sid)
+    return sid, format_requests(sid)

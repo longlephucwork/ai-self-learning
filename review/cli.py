@@ -89,7 +89,7 @@ def cmd_rate(args):
 
 
 def cmd_stats(args):
-    recs = store.iter_sessions()
+    recs = store.iter_sessions(segments=False)   # segments repeat part of a session
     print(f"sessions: {len(recs)}")
     print("outcomes:", dict(collections.Counter(store.outcome(r["session_id"])["outcome"] for r in recs)))
     calls, errs = collections.Counter(), collections.Counter()

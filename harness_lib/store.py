@@ -8,6 +8,9 @@ Layout (root = $LEARNING_HARNESS_STORE or <repo>/store):
     .transcript.state.json  how far the source has been copied (hooks/log_session.copy_transcript)
     .parse.state.json    the parser's progress, so the next ingest parses only new lines
     ratings.jsonl        append-only outcome history, last line wins (only `rate` writes it)
+  sessions/<session_id>~r<from>-<to>/
+    a segment: part of a session (requests <from>..<to>) learned on its own (refine/segment.py). Same files;
+    session.json has "segment": {"of", "requests", "focus"} and no transcript_path.
   hook_events.jsonl      append-only log of hook invocations
   hook_errors.log
 
@@ -185,8 +188,8 @@ def _locked(d: Path):
 
 # ---------- sessions ----------
 
-def upsert_session(s, *, transcript_path: str, hook_event: str | None, end_reason: str | None,
-                   last_assistant_message: str | None = None) -> dict:
+def upsert_session(s, *, transcript_path: str | None, hook_event: str | None, end_reason: str | None,
+                   last_assistant_message: str | None = None, extra: dict | None = None) -> dict:
     """Write session.json from a parsed transcript, keeping ingest bookkeeping and end info."""
     d = session_dir(s.session_id, create=True)
     ts = now()
@@ -225,6 +228,7 @@ def upsert_session(s, *, transcript_path: str, hook_event: str | None, end_reaso
             "requests": s.requests,
             "steps": steps,
             "files_touched": files,
+            **(extra or {}),
         }
         write_json_atomic(d / "session.json", rec)
     append_jsonl(store_dir() / "hook_events.jsonl",
@@ -236,10 +240,19 @@ def load_session(sid: str) -> dict | None:
     return read_json(session_dir(sid) / "session.json")
 
 
-def iter_sessions() -> list[dict]:
+SEGMENT_SEP = "~"   # <session_id>~r<from>-<to>: part of a session, learned on its own
+
+
+def is_segment(sid: str) -> bool:
+    return SEGMENT_SEP in sid
+
+
+def iter_sessions(*, segments: bool = True) -> list[dict]:
+    """Every stored session. segments=False leaves out segments: anything that counts work (uses, stats,
+    new sessions) must, since a segment repeats part of its parent session."""
     out = []
     for d in sessions_dir().iterdir():
-        if d.is_dir():
+        if d.is_dir() and (segments or not is_segment(d.name)):
             rec = read_json(d / "session.json")
             if rec:
                 out.append(rec)
@@ -247,14 +260,15 @@ def iter_sessions() -> list[dict]:
 
 
 def resolve_session(prefix: str) -> str:
-    """Accept a full id, a unique prefix, or 'last'."""
+    """Accept a full id, a unique prefix, or 'last'. Segments only match a prefix that names one."""
     if prefix == "last":
-        recs = iter_sessions()
+        recs = iter_sessions(segments=False)
         if not recs:
             raise LookupError("no sessions stored")
         return max(recs, key=lambda r: r.get("last_activity_at") or "")["session_id"]
     ids = [d.name for d in sessions_dir().iterdir()
-           if d.is_dir() and d.name.startswith(prefix) and (d / "session.json").exists()]
+           if d.is_dir() and d.name.startswith(prefix) and (d / "session.json").exists()
+           and (is_segment(prefix) or not is_segment(d.name))]
     if not ids:
         raise LookupError(f"no session matches {prefix!r}")
     if len(ids) > 1:

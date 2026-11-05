@@ -111,6 +111,114 @@ class Memory(p4.Phase4):
         self.assertTrue((Path(r["brief_path"]) / "BRIEF.md").exists())
         self.assertEqual(self.store.load_pattern(r["pattern"])["status"], "briefed")
 
+    # ---------------- learning part of a session ----------------
+
+    def cli_refine(self, *argv):
+        from refine import refine
+        out = io.StringIO()
+        with mock.patch("sys.stdout", out), mock.patch("sys.stderr", out):
+            try:
+                rc = refine.main(list(argv))
+            except SystemExit as e:
+                rc = e.code
+        return rc, out.getvalue()
+
+
+    def long_session(self, sid="long-1"):
+        """One conversation, three jobs: a question, then a CSV conversion, then release notes."""
+        from hooks.log_session import ingest
+        c, j = "name,qty\napple,3\n", '[{"name": "apple", "qty": 3}]'
+
+        def at(m):
+            return f"2026-11-01T10:{m:02d}:00Z"
+        user = lambda m, content: {"type": "user", "sessionId": sid, "timestamp": at(m),
+                                   "message": {"role": "user", "content": content}}
+        tool = lambda m, tid, name, inp: {"type": "assistant", "sessionId": sid, "timestamp": at(m),
+                                          "message": {"model": "m", "content": [
+                                              {"type": "tool_use", "id": tid, "name": name, "input": inp}]}}
+        result = lambda m, tid, text: user(m, [{"type": "tool_result", "tool_use_id": tid, "content": text}])
+        say = lambda m, text: {"type": "assistant", "sessionId": sid, "timestamp": at(m),
+                               "message": {"model": "m", "content": [{"type": "text", "text": text}]}}
+        L = [user(0, "What does this repo do?"), tool(1, "a1", "Read", {"file_path": "/p/README.md"}),
+             result(2, "a1", "1\tA tool"), say(3, "It's a tool."),
+             user(10, "Convert in.csv to JSON"), tool(11, "b1", "Read", {"file_path": "/p/in.csv"}),
+             result(12, "b1", "".join(f"{i}\t{l}\n" for i, l in enumerate(c.splitlines(), 1))),
+             tool(13, "b2", "Write", {"file_path": "/p/out.json", "content": j}), result(14, "b2", "ok"),
+             say(15, "Converted."),
+             user(20, "Write release notes for v1 from the git log"), tool(21, "c1", "Bash", {"command": "git log"}),
+             result(22, "c1", "abc fix"), tool(23, "c2", "Write", {"file_path": "/p/NOTES.md", "content": "# v1"}),
+             result(24, "c2", "ok"), say(25, "Release notes written.")]
+        tp = self.t / f"{sid}.jsonl"
+        tp.write_text("\n".join(json.dumps(x) for x in L) + "\n")
+        ingest(str(tp), hook_event="SessionEnd", end_reason="other", session_id=sid)
+        return sid, c, j
+
+    def test_list_numbers_the_requests(self):
+        sid, _, _ = self.long_session()
+        rc, out = self.cli_refine("learn", sid, "--list")
+        self.assertEqual(rc, 0, out)
+        self.assertRegex(out, r"\b1 .*What does this repo do")
+        self.assertRegex(out, r"\b2 .*Convert in.csv to JSON")
+        self.assertRegex(out, r"\b3 .*Write release notes")
+
+    def test_learn_one_part_as_a_script(self):
+        sid, c, j = self.long_session()
+        seg = f"{sid}~r2-2"
+        t = {**test_case("s-fruit"), "name": "one", "source_session": seg,
+             "input_files": [{"path": "in.csv", "content": c}],
+             "expected_files": [{"path": "out.json", "content": j, "compare": "json"}]}
+        self.fake({**proposal(tests=[t]), "name": "part-csv"})
+        from refine.learn import learn
+        r = learn(sid, requests="2", focus="the CSV conversion", log=lambda *_: None)
+        self.assertTrue(r["passed"], r["problems"])                       # provenance checked against the part
+        self.assertEqual(r["session"], seg)
+        rec = self.store.load_session(seg)
+        self.assertEqual([q["text"] for q in rec["requests"]], ["Convert in.csv to JSON"])
+        self.assertEqual([st["tool_name"] for st in rec["steps"]], ["Read", "Write"])   # only that part's steps
+        self.assertEqual(rec["segment"], {"of": sid, "requests": [2, 2], "focus": "the CSV conversion"})
+        self.assertIsNone(rec["transcript_path"])                         # hooks never re-ingest a segment
+        self.assertEqual(self.store.outcome(seg)["outcome"], "accepted")
+        self.assertEqual(self.store.outcome(sid)["outcome"], "unknown")   # the rest of the session isn't rated
+        members = self.store.load_pattern(r["pattern"])["session_ids"]
+        self.assertIn(seg, members)
+        self.assertNotIn(sid, members)                                    # the whole conversation isn't evidence
+        self.assertEqual(self.store.load_session(sid)["n_tool_calls"], 5) # parent untouched
+
+    def test_learn_one_part_as_a_skill(self):
+        sid, _, _ = self.long_session()
+        from refine.learn import learn
+        r = learn(sid, requests="3-", focus="the release notes", log=lambda *_: None)   # to the last request
+        self.assertTrue(r["brief"])
+        brief = (Path(r["brief_path"]) / "BRIEF.md").read_text()
+        self.assertIn("Part of a longer conversation", brief)
+        self.assertIn("the release notes", brief)
+        self.assertNotIn("Convert in.csv", brief)                         # nothing from the other parts
+        self.assertNotIn("What does this repo do", brief)
+        prompts = [p.read_text() for p in Path(r["brief_path"]).glob("evals/*/prompt.md")]
+        self.assertTrue(prompts and all("Write release notes for v1" in p for p in prompts))
+
+    def test_part_selection_errors_and_segment_bookkeeping(self):
+        from detect import cluster as cl
+        from refine.learn import LearnError, learn
+        sid, _, _ = self.long_session()
+        for bad in ("0", "4", "3-2", "x", "1-9"):
+            with self.assertRaises(LearnError, msg=bad):
+                learn(sid, requests=bad, log=lambda *_: None)
+        self.assertFalse(any(self.store.is_segment(r["session_id"]) for r in self.store.iter_sessions()))
+        learn(sid, requests="1", log=lambda *_: None)                    # a judgment part: a brief, no draft
+        seg = f"{sid}~r1-1"
+        self.assertEqual(self.store.resolve_session(sid[:4]), sid)        # a prefix finds the session, not its part
+        self.assertEqual(self.store.resolve_session(seg), seg)
+        self.assertNotEqual(self.store.resolve_session("last"), seg)
+        self.assertNotIn(seg, [r["session_id"] for r in self.store.iter_sessions(segments=False)])
+        with self.assertRaises(LearnError):
+            learn(seg, requests="1", log=lambda *_: None)                 # no part of a part
+        # a parent and its own part in one pattern: the work counts once
+        summ = [{"session_id": i, "task_family": "csv", "deterministic": True, "injection": False,
+                 "outcome": "accepted", "intent": "", "inputs": [], "outputs": []} for i in (sid, seg, "s-fruit")]
+        rows = cl.apply_clusters(cl.group_by_family(summ), summ, method="family")
+        self.assertEqual(rows[0]["session_ids"], sorted([seg, "s-fruit"]))
+
     def test_min_success_setting_makes_single_sessions_candidates(self):
         from detect import cluster as cl
         from refine import auto

@@ -413,7 +413,7 @@ def builtin_skill_text() -> str:
     py, repo = python_exe(), REPO.as_posix()
     return f"""---
 name: learning-harness
-description: Use the user's local learning harness. Use when the user says "learn this", "remember how to do this", "make this a skill/script/tool", "turn this into muscle memory", or asks what the harness has learned, drafted or is waiting on.
+description: Use the user's local learning harness. Use when the user says "learn this", "learn just the release part", "remember how to do this", "make this a skill/script/tool", "turn this into muscle memory", or asks what the harness has learned, drafted or is waiting on.
 ---
 
 # Learning harness
@@ -437,6 +437,18 @@ their approval. All commands below are safe to run; none installs anything excep
 4. Only if the user explicitly says yes, install a draft:
    `{py} {repo}/review/cli.py approve <name> --yes --note "approved in chat"`
    Installing changes how Claude behaves in every future session, which is why it needs their yes.
+
+## Learning only part of this session
+
+When the user wants to learn one part of the conversation ("learn the release part", "just the last step"),
+not all of it:
+
+1. Run `{py} {repo}/refine/refine.py learn --list` to number this session's requests.
+2. Pick the range that makes up that part: from the request that started it to the last request that
+   belongs to it. Leave out the request asking to learn it, and the work before and after the part.
+   If it's unclear where the part starts or ends, show the user the numbered requests and ask.
+3. Run `{py} {repo}/refine/refine.py learn --requests N-M --focus "<the part, in the user's words>"`
+   and carry on from step 2 above. Only that part is learned and rated; the rest of the session is untouched.
 
 If `learn` says the session was rated `redone`, or that it's already learned, tell the user and stop.
 

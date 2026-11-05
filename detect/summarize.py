@@ -68,7 +68,9 @@ If one of the EXISTING FAMILIES fits, reuse it exactly.
 - steps: the essential steps that produced the result, generic, in order.
 - deterministic: true only if the input -> output mapping is fully specified, so plain code could \
 do the whole job with no judgment, writing or interpretation. Explain in deterministic_reason.
-- tools_used: Claude Code tool names that mattered."""
+- tools_used: Claude Code tool names that mattered.
+
+Some sessions are ONE PART of a longer conversation, chosen by the user (the data says so at the top). Summarize only that part, as a task in its own right: its first request may lean on earlier work ("now release it"), so describe the task it does, not the conversation around it."""
 
 
 def build_digest(sid: str, step_chars: int = 400) -> str:
@@ -77,6 +79,11 @@ def build_digest(sid: str, step_chars: int = 400) -> str:
     steps = s["steps"]
 
     parts = ["## USER REQUESTS"]
+    seg = s.get("segment")
+    if seg:
+        parts.append(f"(One part of a longer conversation: requests {seg['requests'][0]}-{seg['requests'][1]}, "
+                     f"which the user chose to learn on its own"
+                     + (f". The user describes it as: {seg['focus'][:300]}" if seg.get("focus") else "") + ")")
     parts += [f"- {r['text'][:2000]}" for r in s["requests"]]
     parts.append(f"\n## TOOL STEPS ({len(steps)} total)")
     shown = steps if len(steps) <= MAX_STEPS_IN_DIGEST else \

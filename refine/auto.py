@@ -102,7 +102,7 @@ def log(msg: str) -> None:
 def new_finished_sessions(since: str | None) -> list[str]:
     t0 = _ts(since) if since else None
     out = []
-    for r in store.iter_sessions():
+    for r in store.iter_sessions(segments=False):   # a segment is made by `learn`, not new work
         end = _ts(r.get("ended_at")) if r.get("ended_at") else None
         if end and (t0 is None or end > t0):
             out.append(r["session_id"])
@@ -193,7 +193,7 @@ note: for "edited" or "redone", what the user wanted changed, in their words whe
 
 def sessions_to_rate() -> list[str]:
     out = []
-    for r in store.iter_sessions():
+    for r in store.iter_sessions(segments=False):   # segments are rated by `learn` itself
         sid = r["session_id"]
         if not r.get("ended_at"):
             continue

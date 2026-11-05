@@ -151,6 +151,10 @@ def apply_clusters(clusters: list[dict], summaries: list[dict], *, method: str,
     # later repeat is grouped with it). Exceptions: locked or quick-learned patterns, and min_success == 1.
     min_keep = 1 if min_success <= 1 else 2
     for c in clusters:
+        # A segment is part of its parent session: when both land in one pattern, the work would count
+        # twice, so the parent goes (the segment is the more exact evidence).
+        parents = {store.load_session(i).get("segment", {}).get("of") for i in c["session_ids"] if store.is_segment(i)}
+        c = {**c, "session_ids": [i for i in c["session_ids"] if i not in parents]}
         members = [by_id[i] for i in c["session_ids"]]
         prev = existing.get(c["key"]) or {}
         if len(members) < min_keep and prev.get("status") not in LOCKED_STATUSES and not prev.get("quick"):
