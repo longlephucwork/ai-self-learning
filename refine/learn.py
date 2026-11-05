@@ -106,6 +106,8 @@ def learn(session: str | None = None, *, requests: str | None = None, focus: str
                    "session_ids": sorted({sid, *prior}), "excluded_injection": [], "method": "quick", "quick": True,
                    "created_at": store.now(), "updated_at": store.now()}
     store.save_pattern(pattern)
+    from refine.synapse import remember
+    remember(pattern["session_ids"])   # relearning a forgotten task brings its sessions back
     if pattern["suggested_type"] == "skill":
         from refine.brief import write_brief
         b = write_brief(key)

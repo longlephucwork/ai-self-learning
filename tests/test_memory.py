@@ -576,6 +576,94 @@ class Memory(p4.Phase4):
         e = install.load_registry()["installed"]["csv-skill"]
         self.assertNotIn(seg, refine.missed_opportunities(e, refine.collect_uses(e)))
 
+    # ---------------- memory paths: strengthen with practice, fade without it ----------------
+
+    def aged(self, sid, days_ago):
+        """Pretend session `sid` ended `days_ago` days ago."""
+        d = self.store.session_dir(sid)
+        rec = json.loads((d / "session.json").read_text())
+        rec["ended_at"] = (datetime.now(timezone.utc) - timedelta(days=days_ago)).isoformat().replace("+00:00", "Z")
+        self.store.write_json_atomic(d / "session.json", rec)
+
+    def short_term(self, key, ages, *, quick=False):
+        sids = []
+        for n, age in enumerate(ages):
+            sid, _, _ = self.fresh_session(f"{key}-{n}")
+            self.store.rate(sid, "accepted")
+            self.aged(sid, age)
+            sids.append(sid)
+        self.store.save_pattern({"key": key, "label": key, "description": "", "status": "forming", "quick": quick,
+                                 "n_sessions": len(sids), "n_success": len(sids), "min_success": 3,
+                                 "success_outcomes": ["accepted", "edited"], "deterministic_frac": 1.0,
+                                 "suggested_type": "script", "type_rationale": "", "session_ids": sids,
+                                 "excluded_injection": []})
+        return sids
+
+    def test_spaced_practice_builds_a_stronger_path_than_massed(self):
+        from refine.synapse import strengthen
+        t0 = datetime(2026, 1, 1, tzinfo=timezone.utc)
+        massed = strengthen([t0, t0 + timedelta(hours=1), t0 + timedelta(hours=2)], stability=30, now=t0)
+        spaced = strengthen([t0 - timedelta(days=14), t0 - timedelta(days=7), t0], stability=30, now=t0)
+        self.assertEqual((massed["repeats"], massed["stability_days"]), (3, 30))      # massed: no stability
+        self.assertEqual(spaced["stability_days"], 120)                                # spaced: doubled twice
+        later = t0 + timedelta(days=90)
+        self.assertGreater(strengthen([t0 - timedelta(days=14), t0 - timedelta(days=7), t0], stability=30,
+                                      now=later)["strength"],
+                           strengthen([t0, t0 + timedelta(hours=1), t0 + timedelta(hours=2)], stability=30,
+                                      now=later)["strength"])                          # and fades more slowly
+        self.assertAlmostEqual(strengthen([t0], stability=30, now=t0 + timedelta(days=30))["strength"], 0.5)
+
+    def test_an_unpractised_task_is_forgotten_and_its_sessions_released(self):
+        from detect import cluster as cl
+        from detect import summarize as sm
+        from refine import auto, synapse
+        old = self.short_term("old-task", [200, 190])
+        recent = self.short_term("recent-task", [3, 1])
+        asked = self.short_term("asked-task", [300], quick=True)
+        self.assertEqual(synapse.path(self.store.load_pattern("old-task"))["state"], "forgotten-soon")
+        self.assertEqual(synapse.path(self.store.load_pattern("recent-task"))["state"], "strong")
+        self.assertEqual(synapse.forget_faded(), ["old-task"])
+        self.assertIsNone(self.store.load_pattern("old-task"))
+        self.assertTrue(self.store.load_pattern("recent-task"))
+        self.assertTrue(self.store.load_pattern("asked-task"))                         # "learn this" isn't forgotten
+        self.assertEqual(synapse.forgotten_sessions(), set(old))
+        sm.summarize_sessions(old + recent, log=lambda *_: None)
+        self.assertFalse({s["session_id"] for s in cl.load_summaries()} & set(old))  # not re-formed from them
+        self.assertTrue(set(old) <= set(auto.prune_sessions(90, dry_run=True)))    # no longer evidence: pruned
+        self.assertFalse(set(recent + asked) & set(auto.prune_sessions(90, dry_run=True)))
+        auto.prune_sessions(90)
+        synapse.drop_pruned({r["session_id"] for r in self.store.iter_sessions()})
+        self.assertEqual(synapse.forgotten_sessions(), set())
+
+    def test_relearning_brings_a_forgotten_session_back(self):
+        from refine import synapse
+        from refine.learn import learn
+        old = self.short_term("old-task", [200, 190])
+        synapse.forget_faded()
+        self.fake({**proposal(tests=[]), "name": "relearned"})
+        learn(old[0], log=lambda *_: None)
+        self.assertNotIn(old[0], synapse.forgotten_sessions())
+
+    def test_using_a_learned_skill_is_rehearsal(self):
+        from refine import synapse
+        self.install_skill()
+        before = synapse.path(self.store.load_pattern("csv-to-json-conversion"))
+        self.assertEqual(before["stage"], "long-term")
+        self.use_skill(3)
+        after = synapse.path(self.store.load_pattern("csv-to-json-conversion"))
+        self.assertGreater(after["strength"], before["strength"])
+        self.assertEqual(after["repeats"], before["repeats"] + 3)                     # one per session that used it
+        self.assertGreaterEqual(after["stability_days"], 60)                           # consolidated: doubled
+
+    def test_memory_command_shows_the_paths(self):
+        self.short_term("old-task", [200, 190])
+        self.short_term("recent-task", [3, 1])
+        rc, out = self.cli_refine("memory")
+        self.assertEqual(rc, 0, out)
+        self.assertRegex(out, r"short-term .*strong .*recent-task")
+        self.assertRegex(out, r"short-term .*forgotten-soon .*old-task")
+        self.assertLess(out.index("recent-task"), out.index("old-task"))               # strongest first
+
     def test_missing_skill_link_is_repaired(self):
         from registry import install
         self.install_skill()

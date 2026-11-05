@@ -11,6 +11,8 @@ What changed in each version of the learning harness. The format follows
 
 - **Skills Claude didn't use get their description fixed.** When 2 or more later sessions do a learned skill's task without Claude loading it, the background run writes an update brief. It lists how you actually asked, and skill-creator fixes the skill's description with its description optimization, using a ready trigger eval set built from your real requests (plus near misses from your other tasks). `refine.py fix-triggers <skill>` does it by hand. Corrections and missed triggers for the same skill share one brief.
 
+- **Memory like a brain's.** Repeated work builds a path that strengthens with every successful repeat and fades without one. Spaced practice (repeats on later days) makes a path last longer than massed practice. A task that fades before it's learned is forgotten, so its pattern and sessions are cleaned up instead of being kept forever. A learned task is in long-term memory, where it fades more slowly and every use counts as rehearsal. `refine.py memory` shows every path, `refine.py report` shows each learned item's, and `auto-config --memory-days` sets how fast unpractised tasks fade. When a task is learned still follows `--learn-after`.
+
 ### Fixed
 - A part of a session that used a skill is no longer reported as having missed it.
 - Skill briefs tell Claude to run skill-creator's test runs with `LEARNING_HARNESS_DISABLE=1`, so the harness doesn't log those runs as your sessions and learn from them.

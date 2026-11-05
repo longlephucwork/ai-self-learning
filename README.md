@@ -42,7 +42,9 @@ Use Claude Code as usual. The loop:
 3. **You approve.** Claude shows what it made and installs it only on your yes. From then on, Claude Code uses it.
 4. **It improves.** When you have to correct a skill's results, the harness writes an update brief, and Claude offers to update the skill the same way. When Claude does a learned task without using its skill (its description doesn't match how you ask), the brief fixes the description, using your real requests as test cases.
 
-If you decline, a background run (every few hours, within $5/month) still learns tasks you repeat 3+ times. It also rates how sessions went. Claude mentions what's ready at the start of your next session. When it can't tell whether a repeated task went well, Claude asks you instead of guessing.
+If you decline, a background run (every few hours, within $5/month) still learns tasks you repeat 3+ times.
+
+**Memory like a brain's.** Each task you repeat builds a path that strengthens with practice and fades without it. Practice spread over days lasts longer than the same practice crammed into one afternoon. A task you stop doing before it's learned is forgotten, and its sessions are cleaned up. A learned item stays strong as long as it's used. `refine.py memory` shows every path. It also rates how sessions went. Claude mentions what's ready at the start of your next session. When it can't tell whether a repeated task went well, Claude asks you instead of guessing.
 
 **Learn right away:** say **"learn this"** in any session. Claude asks before installing anything.
 
@@ -74,6 +76,7 @@ You can also do it all by hand. Run these from `~/claude-learning-harness` (on W
 | `python3 refine/refine.py learn --requests 7-9 --focus "..."` | learn only that part of the session |
 | `python3 refine/refine.py report` | what's learned: uses, accuracy, and what's ready to become automatic |
 | `python3 refine/refine.py auto-status` | automatic learning on/off, this month's spend, what's waiting |
+| `python3 refine/refine.py memory` | every task's memory path: short-term or long-term, strength, fading |
 | `python3 refine/refine.py auto-config` | show or change the budget, how often it runs, and how many sessions it waits for (below) |
 | `python3 registry/install.py list` | what's installed |
 | `python3 registry/install.py uninstall <name>` | remove an installed item |
@@ -105,6 +108,7 @@ python3 refine/refine.py auto-config --budget 10 --every 12h --after-sessions 2 
 | `--learn-after N` | `3` | successful repeats before a task is learned (`1`: after one) |
 | `--max-drafts N` | `1` | drafts per background run |
 | `--keep-days N` | `90` | days before an old one-off session is forgotten |
+| `--memory-days N` | `30` | how fast an unpractised task fades from short-term memory (its starting half-life) |
 
 Run it with no options to see the current values. `--reset every` (or `--reset all`) brings back the defaults, and `--on` / `--off` switches background learning. The installer takes `--budget`, `--every`, `--after-sessions` and `--learn-after` too. A larger budget, more drafts or `--learn-after 1` mean more drafting, so more spend.
 

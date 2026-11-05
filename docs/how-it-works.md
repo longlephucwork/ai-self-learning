@@ -311,6 +311,32 @@ A long session often does several jobs in a row: update a repo, merge a PR, then
 
 To make the background run do this for every task, set `"min_success": 1` under `"auto"` in `store/config.json` (default 3). It drafts much more, so it costs more.
 
+## Memory paths: short-term and long-term (`refine/synapse.py`)
+
+Repeated work builds a path, like a synapse. It strengthens with practice and fades without it. `refine.py memory` shows every task's path.
+
+- **Strength** (the synapse weight): every successful repeat adds 1. Between repeats it decays exponentially, halving every *stability* days.
+- **Stability:** starts at `memory_days` (30). Spaced practice builds it: each repeat on a later day doubles it, up to a year. Repeats on the same day add strength but no stability, as massed practice does.
+
+| Stage | What | How it changes |
+|---|---|---|
+| **Short-term** | a task seen but not learned yet (a forming or candidate pattern) | fades. Once its strength is below 0.25 it's **forgotten**: the pattern goes, its sessions are no longer grouped or kept as evidence, and they're pruned like any old one-off. |
+| **Long-term** | a learned task (briefed, drafted or installed) | consolidation doubles its stability once. Every use of the learned item is **rehearsal**, a repeat that keeps the path strong. |
+| **Automatic** | a task done by an installed script or tool | muscle memory (below) |
+
+With the default 30 days and no further repeats:
+
+| Practice | Forgotten after about |
+|---|---|
+| done once | 2 months |
+| 3 times in one afternoon (massed) | 3½ months |
+| quarterly, 3 times | 10 months |
+| 3 times, a week apart (spaced) | 14 months |
+
+- **Learning still follows the repeat count.** When a task is learned is decided by `min_success` (`--learn-after`), so the memory model never stops a task from being learned. A quarterly task is learned on its third repeat. It decides what's forgotten, and `refine.py report` shows each learned item's path.
+- **"Learn this" is never forgotten.** A task you asked to learn isn't forgotten. Learning a forgotten task again brings its sessions back.
+- **Settings:** `refine.py auto-config --memory-days N` changes how quickly an unpractised task fades. The background run does the forgetting, right after grouping.
+
 ## Muscle memory (`refine/memory.py`)
 
 The harness has two levels, like a person learning a task:

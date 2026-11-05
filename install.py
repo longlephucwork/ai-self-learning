@@ -458,6 +458,7 @@ If `learn` says the session was rated `redone`, or that it's already learned, te
 - What has been learned, and how practised it is: `{py} {repo}/refine/refine.py report`
 - Turn a well-practised skill into a tool (muscle memory): `{py} {repo}/refine/refine.py promote <skill>`; add `--as script` for a script instead
 - Automatic learning status and budget: `{py} {repo}/refine/refine.py auto-status`
+- What it remembers, and what's fading: `{py} {repo}/refine/refine.py memory`
 
 ## Changing how automatic learning runs
 

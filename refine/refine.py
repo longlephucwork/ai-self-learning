@@ -16,6 +16,7 @@
   refine.py fix-triggers <skill>               brief a description fix for a skill Claude didn't use when it should
                                                have (the background run does this after 2 missed sessions)
   refine.py prune [--days N] [--dry-run]       delete old one-off sessions that are evidence for nothing
+  refine.py memory                             every task's memory path: stage, strength, stability, fading
   refine.py auto [--force]                     one automatic-learning run (normally started by the SessionEnd hook)
   refine.py auto-status                        settings, budget, last run, drafts waiting
   refine.py auto-config [--budget USD] [--every 6h] [--after-sessions N] [--learn-after N] [--max-drafts N]
@@ -210,6 +211,13 @@ def build_report(*, stale_days=60, min_failures=2, fail_rate=0.3, now=None) -> d
             rec["action"] = "demote"
             rec["reasons"].append(f"it replaced the skill {entry['promoted_from']['skill']}; "
                                   f"demoting brings that skill back")
+        pattern = store.load_pattern(entry["pattern_key"])
+        if pattern:
+            from refine import synapse
+            m = synapse.path(pattern, now=now)
+            st["memory"] = {k: m[k] for k in ("stage", "strength", "stability_days", "state")}
+            rec["reasons"].append(f"memory: {m['state']} {m['stage']} path (strength {m['strength']:.2f}, "
+                                  f"half-life {m['stability_days']:g} days)")
         items.append({**{k: v for k, v in st.items() if k != "uses_detail"}, **rec})
     rep = {"generated_at": store.now(), "thresholds": {"stale_days": stale_days, "min_failures": min_failures,
                                                        "fail_rate": fail_rate},
@@ -292,6 +300,7 @@ def main(argv=None):
     p = sub.add_parser("fix-triggers"); p.add_argument("name", help="an installed skill")
     p = sub.add_parser("auto"); p.add_argument("--force", action="store_true", help="ignore the throttle")
     sub.add_parser("auto-status")
+    sub.add_parser("memory", help="every task's memory path: stage, strength, stability, fading")
     p = sub.add_parser("auto-config", help="show or change automatic learning's settings")
     p.add_argument("--budget", metavar="USD", help="monthly budget for background learning (default 5)")
     p.add_argument("--every", metavar="TIME", help="at most one background run per TIME: 6h, 90m, 1d (default 6h)")
@@ -299,6 +308,8 @@ def main(argv=None):
     p.add_argument("--learn-after", metavar="N", help="successful repeats before a task is learned (default 3)")
     p.add_argument("--max-drafts", metavar="N", help="drafts per background run (default 1)")
     p.add_argument("--keep-days", metavar="N", help="days before a finished one-off session is forgotten (default 90)")
+    p.add_argument("--memory-days", metavar="N",
+                   help="days for an unpractised task to half fade from short-term memory (default 30)")
     onoff = p.add_mutually_exclusive_group()
     onoff.add_argument("--on", dest="enabled", action="store_const", const=True)
     onoff.add_argument("--off", dest="enabled", action="store_const", const=False)
@@ -473,6 +484,23 @@ def main(argv=None):
         r = auto.run(force=a.force)
         if not r["ran"]:
             print(f"not run: {r['reason']}")
+        return 0
+    elif a.cmd == "memory":
+        from refine import synapse
+        rows = synapse.paths()
+        if not rows:
+            print("no tasks remembered yet")
+            return 0
+        print(f"{'stage':11} {'strength':18} {'repeats':>7} {'stability':>9}  {'last repeat':11} {'state':14} task")
+        for r in rows:
+            bar = "#" * min(10, round(r["strength"] * 2)) or "."
+            print(f"{r['stage']:11} {bar:10} {r['strength']:7.2f} {r['repeats']:7} {r['stability_days']:8g}d  "
+                  f"{(r['last'] or 'never')[:10]:11} {r['state']:14} {r['key']}"
+                  + (f"  ({', '.join(r['items'])})" if r["items"] else ""))
+        n = len(synapse.forgotten_sessions())
+        print(f"\nstrength: +1 per successful repeat, halving every `stability` days without one; spaced repeats "
+              f"double stability. Short-term tasks below {synapse.FORGET_BELOW} are forgotten."
+              + (f"\n{n} session(s) of forgotten tasks wait to be pruned." if n else ""))
         return 0
     elif a.cmd == "auto-config":
         from refine import auto

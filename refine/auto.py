@@ -19,6 +19,7 @@ Settings, in store/config.json under "auto" (defaults shown). Change them with `
   keep_days: 90    (finished one-off sessions older than this, evidence for nothing, are deleted)
   promote_min_uses: 5   promote_min_accuracy: 0.9   promote_min_mechanical: 0.75
   promote_as: "tool"   (what a promoted skill becomes: "tool" or "script")
+  memory_days: 30   (how long an unpractised task takes to half fade from short-term memory; refine/synapse.py)
 Every model call's cost goes to store/spend.jsonl. Background runs stop when the month's spend reaches
 the budget, and each call's own limit is capped at what remains.
 """
@@ -42,7 +43,7 @@ DEFAULTS = {"enabled": False, "monthly_budget_usd": 5.0, "min_hours_between_runs
             "keep_days": 90,
             "max_drafts_per_run": 1, "retry_days": 7, "min_confidence": 0.6, "min_success": 3,
             "promote_min_uses": 5, "promote_min_accuracy": 0.9, "promote_min_mechanical": 0.75,
-            "promote_as": "tool"}
+            "promote_as": "tool", "memory_days": 30}
 LOCK_STALE_S = 2 * 3600
 RETRY_AFTER_FAILURE = timedelta(hours=1)
 _children: list = []   # keep spawned runs referenced, so their handles aren't collected while they run
@@ -95,6 +96,7 @@ SETTINGS = {
     "learn-after": ("min_success", "int", 1, "successful repeats before a task is learned (1 = after one)"),
     "max-drafts": ("max_drafts_per_run", "int", 0, "drafts per background run (caps its cost)"),
     "keep-days": ("keep_days", "int", 1, "days before a finished one-off session is forgotten"),
+    "memory-days": ("memory_days", "int", 1, "days for an unpractised task to half fade from short-term memory"),
 }
 
 _DURATION = re.compile(r"\s*(\d+(?:\.\d+)?)\s*(m|min|mins|minutes?|h|hr|hrs|hours?|d|days?)?\s*", re.IGNORECASE)
@@ -570,6 +572,8 @@ def run(*, force: bool = False) -> dict:
         pruned = prune_sessions(int(cfg["keep_days"]))
         if pruned:
             log(f"  forgot {len(pruned)} one-off session(s) older than {cfg['keep_days']} days")
+        from refine import synapse
+        synapse.drop_pruned({r["session_id"] for r in store.iter_sessions()})
         result["ratings"] = infer_ratings(sessions_to_rate(), min_confidence=cfg["min_confidence"])
 
         from detect import cluster as cl
@@ -587,7 +591,10 @@ def run(*, force: bool = False) -> dict:
                 log(f"  grouping with claude failed ({str(e)[:100]}); grouping by family")
                 clusters, method = cl.group_by_family(summaries), "family"
             rows = cl.apply_clusters(clusters, summaries, method=method, min_success=int(cfg["min_success"]))
-            result["candidates"] = [r["key"] for r in rows if r["status"] == "candidate"]
+            # short-term memory fades: a task not repeated for long enough is forgotten
+            result["forgotten"] = synapse.forget_faded(log=lambda m: log(m))
+            result["candidates"] = [r["key"] for r in rows if r["status"] == "candidate"
+                                    and r["key"] not in result["forgotten"]]
 
         from generate.propose import propose
         from refine.brief import write_brief

@@ -72,9 +72,13 @@ essential.
 
 
 def load_summaries() -> list[dict]:
+    from refine.synapse import forgotten_sessions
+    forgotten = forgotten_sessions()   # a forgotten task isn't re-formed from its stale sessions
     out = []
     for r in store.iter_sessions():
         sid = r["session_id"]
+        if sid in forgotten:
+            continue
         rec = store.load_summary(sid)
         if not rec:
             continue
