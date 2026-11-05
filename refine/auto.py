@@ -461,12 +461,30 @@ def confirm_context(items: list[dict]) -> list[str]:
 
 # ---------------- one run ----------------
 
-def improvements_needed(min_corrected: int = 2, max_accuracy: float = 0.8) -> list[dict]:
-    """Installed skills whose recent uses the user had to correct, with what went wrong (no model call).
-
-    A use needed correcting when it failed, or its session was rated `edited` or `redone`. Each skill version
-    gets at most one improvement brief, so a skill that keeps going wrong is re-briefed only after it's updated."""
+def _corrections(e: dict, uses: list[dict]) -> tuple[list[dict], float | None]:
+    """(uses the user had to correct, as failure records; accuracy) for an installed skill."""
     from refine import memory
+    bad = [u for u in uses if u["failed"] or u.get("session_outcome") in ("edited", "redone")]
+    failures = []
+    for u in bad[-15:]:
+        f = {"source": u["source"], "at": u["at"],
+             "detail": u.get("detail") if u["failed"] else f"the user had to fix the result (rated "
+                                                             f"`{u.get('session_outcome')}`)"}
+        if u.get("session_note"):
+            f["user_note"] = u["session_note"]
+        failures.append(f)
+    return failures, memory.practice(e, uses)["accuracy"]
+
+
+def skill_updates_needed(min_corrected: int = 2, max_accuracy: float = 0.8, min_missed: int = 2) -> list[dict]:
+    """Installed skills that need an update brief, and why (no model call). Two reasons:
+
+    corrections  2+ uses the user had to correct (failed, or rated `edited` / `redone`) and under 80% accurate
+    missed       2+ later sessions did the skill's task without Claude loading it: its description doesn't
+                 match how the user asks
+
+    Each reason is briefed at most once per skill version, so a skill isn't re-briefed until it's updated. A
+    brief covers every reason that applies, since a skill has one brief folder."""
     from refine import refine
     from registry import install as reg
     out = []
@@ -474,50 +492,64 @@ def improvements_needed(min_corrected: int = 2, max_accuracy: float = 0.8) -> li
         if e["type"] != "skill" or e.get("wraps"):
             continue
         pattern = store.load_pattern(e["pattern_key"]) or {}
-        if pattern.get("improvement_briefed_for") == e["version"]:
-            continue
         uses = refine.collect_uses(e)
-        bad = [u for u in uses if u["failed"] or u.get("session_outcome") in ("edited", "redone")]
-        acc = memory.practice(e, uses)["accuracy"]
-        if len(bad) < min_corrected or acc is None or acc >= max_accuracy:
+        failures, acc = _corrections(e, uses)
+        corrections = len(failures) >= min_corrected and acc is not None and acc < max_accuracy
+        missed = refine.missed_opportunities(e, uses)
+        missing = len(missed) >= min_missed
+        due = (corrections and pattern.get("improvement_briefed_for") != e["version"]) or \
+              (missing and pattern.get("triggers_briefed_for") != e["version"])
+        if not due:
             continue
-        failures = []
-        for u in bad[-15:]:
-            f = {"source": u["source"], "at": u["at"],
-                 "detail": u.get("detail") if u["failed"] else f"the user had to fix the result (rated "
-                                                                 f"`{u.get('session_outcome')}`)"}
-            if u.get("session_note"):
-                f["user_note"] = u["session_note"]
-            failures.append(f)
-        out.append({"entry": e, "failures": failures, "accuracy": acc,
+        out.append({"entry": e, "failures": failures if corrections else [], "accuracy": acc,
+                    "missed": missed if missing else [],
                     "sessions": sorted({u["session_id"] for u in uses if u.get("session_id")
                                         and u.get("session_outcome") != "redone"})})
     return out
 
 
-def brief_improvements(log=lambda *_: None) -> list[str]:
-    """Write an improvement brief (for skill-creator) for each skill in improvements_needed()."""
+def improvements_needed(min_corrected: int = 2, max_accuracy: float = 0.8) -> list[dict]:
+    """Installed skills whose recent uses the user had to correct, with what went wrong (no model call)."""
+    return [i for i in skill_updates_needed(min_corrected, max_accuracy, min_missed=10**9) if i["failures"]]
+
+
+def write_update_brief(e: dict, *, failures: list[dict], missed: list[str], sessions: list[str]) -> dict:
+    """Write the update brief for installed skill `e` and record what it covers (once per version)."""
     from refine.brief import write_brief
-    done = []
-    for item in improvements_needed():
-        e = item["entry"]
-        pattern = store.load_pattern(e["pattern_key"])
-        if not pattern:
-            continue
-        # the sessions that used the skill, with the user's corrections, become the brief's evidence
-        pattern["session_ids"] = sorted(set(pattern.get("session_ids", [])) | set(item["sessions"]))
-        store.save_pattern(pattern)
-        try:
-            b = write_brief(e["pattern_key"], improve={**e, "failures": item["failures"]})
-        except (LookupError, OSError) as ex:
-            log(f"  improvement brief for {e['name']} failed: {ex}")
-            continue
-        pattern = store.load_pattern(e["pattern_key"]) or pattern
+    pattern = store.load_pattern(e["pattern_key"])
+    if not pattern:
+        raise LookupError(f"no pattern {e['pattern_key']!r}")
+    # the sessions that used the skill, with the user's corrections, become the brief's evidence
+    pattern["session_ids"] = sorted(set(pattern.get("session_ids", [])) | set(sessions) | set(missed))
+    store.save_pattern(pattern)
+    b = write_brief(e["pattern_key"], improve={**e, "failures": failures, "missed": missed})
+    pattern = store.load_pattern(e["pattern_key"]) or pattern
+    if failures:
         pattern["improvement_briefed_for"] = e["version"]   # only once it worked, so a failure is retried
-        store.save_pattern(pattern)
+    if missed:
+        pattern["triggers_briefed_for"] = e["version"]
+    store.save_pattern(pattern)
+    return b
+
+
+def brief_improvements(log=lambda *_: None) -> list[str]:
+    """Write an update brief (for skill-creator) for each skill in skill_updates_needed()."""
+    done = []
+    for item in skill_updates_needed():
+        e = item["entry"]
+        try:
+            b = write_update_brief(e, failures=item["failures"], missed=item["missed"], sessions=item["sessions"])
+        except (LookupError, OSError) as ex:
+            log(f"  update brief for {e['name']} failed: {ex}")
+            continue
         done.append(b["brief"])
-        log(f"  {e['name']} v{e['version']} needed correcting ({item['accuracy']:.0%} accurate): improvement brief "
-            f"-> {b['path']} (to be built with skill-creator)")
+        why = []
+        if item["failures"]:
+            why.append(f"needed correcting ({item['accuracy']:.0%} accurate)")
+        if item["missed"]:
+            why.append(f"wasn't used in {len(item['missed'])} session(s) that did its task")
+        log(f"  {e['name']} v{e['version']} {' and '.join(why)}: update brief -> {b['path']} "
+            f"(to be built with skill-creator)")
     return done
 
 
@@ -568,7 +600,7 @@ def run(*, force: bool = False) -> dict:
                 log(f"  skill brief for {p['key']} -> {b['path']} (to be built with skill-creator)")
             except (LookupError, OSError) as e:
                 log(f"  brief for {p['key']} failed: {e}")
-        briefs += brief_improvements(log=lambda m: log(m))   # skills that keep needing corrections
+        briefs += brief_improvements(log=lambda m: log(m))   # skills needing corrections or missed by Claude
         result["briefs"] = briefs
         for p in [p for p in cands if p.get("suggested_type") != "skill"][: cfg["max_drafts_per_run"]]:
             try:
@@ -673,8 +705,13 @@ def brief_context(briefs: list[dict]) -> list[str]:
     cli = (store.REPO_ROOT / "review" / "cli.py").as_posix()
     lines = ["[learning-harness] Skills are built with skill-creator, and these are ready to build:"]
     for b in briefs:
-        what = "an update of the skill" if b.get("improve") else "a new skill"
-        lines.append(f"- {what} '{b['name']}' from {len(b['sessions'])} session(s); brief: {b['path']}/BRIEF.md")
+        imp = b.get("improve") or {}
+        what = "an update of the skill" if imp else "a new skill"
+        why = {"corrections": "you kept having to correct it",
+               "missed": "Claude didn't use it in sessions that did its task, so its description needs fixing"}
+        reasons = [why[r] for r in imp.get("reasons", []) if r in why]
+        lines.append(f"- {what} '{b['name']}' from {len(b['sessions'])} session(s)"
+                     + (f" ({'; '.join(reasons)})" if reasons else "") + f"; brief: {b['path']}/BRIEF.md")
     if find_skill_creator() is None:
         inst = (store.REPO_ROOT / "install.py").as_posix()
         lines.append("skill-creator wasn't found in ~/.claude/skills or ~/.claude/plugins. If the skill-creator skill "

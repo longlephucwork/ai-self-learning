@@ -13,6 +13,8 @@
                                                sessions; learns the task right away if it now qualifies
   refine.py promote <skill> [--as tool|script] turn a well-practised skill into a tool or script (muscle memory)
   refine.py demote <tool|script>               bring back the skill a promoted tool or script replaced
+  refine.py fix-triggers <skill>               brief a description fix for a skill Claude didn't use when it should
+                                               have (the background run does this after 2 missed sessions)
   refine.py prune [--days N] [--dry-run]       delete old one-off sessions that are evidence for nothing
   refine.py auto [--force]                     one automatic-learning run (normally started by the SessionEnd hook)
   refine.py auto-status                        settings, budget, last run, drafts waiting
@@ -128,12 +130,16 @@ def missed_opportunities(entry: dict, uses: list[dict]) -> list[str]:
     for other in reg.load_registry()["installed"].values():
         if other["name"] != entry["name"] and other["pattern_key"] == entry["pattern_key"]:
             used_in |= {u["session_id"] for u in collect_uses(other) if u.get("session_id")}
+    match = _matchers(entry)
     out = []
     for sid in pattern.get("session_ids", []):
         s = store.load_session(sid) or {}
         started = _ts(s.get("started_at"))
-        if since and started and started > since and sid not in used_in:
-            out.append(sid)
+        if not (since and started and started > since) or sid in used_in:
+            continue
+        if store.is_segment(sid) and any(match(st) for st in s.get("steps", [])):
+            continue   # uses are counted on the whole session, so a part that used it looks at its own steps
+        out.append(sid)
     return out
 
 
@@ -162,7 +168,9 @@ def recommend(st: dict, *, now: datetime, stale_days: int, min_failures: int, fa
     if st["missed"]:
         reasons.append(f"{len(st['missed'])} later session(s) did this task without using it"
                        + (f" (Claude may not know it exists; `refine.py expose {st['name']}` makes it an MCP tool)"
-                          if st["type"] == "script" else ""))
+                          if st["type"] == "script" else
+                          f" (its description doesn't match how you ask; `refine.py fix-triggers {st['name']}` "
+                          f"briefs a fix, as the background run does after 2)" if st["type"] == "skill" else ""))
         if action == "keep":
             action = "missed"
     if not reasons:
@@ -281,6 +289,7 @@ def main(argv=None):
     p.add_argument("--as", dest="as_type", choices=["tool", "script"],
                    help='what to turn the skill into (default: "promote_as" in the auto config, else tool)')
     p = sub.add_parser("demote"); p.add_argument("name"); p.add_argument("--yes", action="store_true")
+    p = sub.add_parser("fix-triggers"); p.add_argument("name", help="an installed skill")
     p = sub.add_parser("auto"); p.add_argument("--force", action="store_true", help="ignore the throttle")
     sub.add_parser("auto-status")
     p = sub.add_parser("auto-config", help="show or change automatic learning's settings")
@@ -427,6 +436,25 @@ def main(argv=None):
             print(f"review: python3 review/cli.py review {name}   approve (retires the skill): "
                   f"python3 review/cli.py approve {name}")
         return 0 if r["passed"] else 1
+    elif a.cmd == "fix-triggers":
+        from refine import auto
+        entry = installed.get(a.name)
+        if not entry or entry["type"] != "skill":
+            sys.exit(f"error: {a.name!r} is not an installed skill")
+        uses = collect_uses(entry)
+        missed = missed_opportunities(entry, uses)
+        if not missed:
+            sys.exit(f"error: no session since v{entry['version']} did {a.name}'s task without using it, so there's "
+                     f"nothing to fix the description from")
+        failures, acc = auto._corrections(entry, uses)
+        corrections = len(failures) >= 2 and acc is not None and acc < 0.8
+        b = auto.write_update_brief(entry, failures=failures if corrections else [], missed=missed,
+                                    sessions=sorted({u["session_id"] for u in uses if u.get("session_id")}))
+        print(f"UPDATE BRIEF: {b['path']}/BRIEF.md  ({len(missed)} missed session(s); trigger eval set in "
+              f"{b['path']}/evals/trigger-eval.json)\n"
+              f"Ask Claude to update the skill with skill-creator from that brief, then run: "
+              f"python3 review/cli.py adopt {b['brief']}")
+        return 0
     elif a.cmd == "demote":
         from refine import memory
         if not a.yes and not (sys.stdin.isatty() and input(f"Bring back the skill and remove {a.name}? [y/N] ")

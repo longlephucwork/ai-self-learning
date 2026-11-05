@@ -40,7 +40,7 @@ Use Claude Code as usual. The loop:
 1. **You repeat a task.** Claude notices it's one you've asked for before, does it, then offers to make it reusable.
 2. **You say yes.** A task that needs judgment becomes a skill, which Claude builds with you using skill-creator. A mechanical task becomes a tested script or tool.
 3. **You approve.** Claude shows what it made and installs it only on your yes. From then on, Claude Code uses it.
-4. **It improves.** When you have to correct a skill's results, the harness writes an update brief, and Claude offers to update the skill the same way.
+4. **It improves.** When you have to correct a skill's results, the harness writes an update brief, and Claude offers to update the skill the same way. When Claude does a learned task without using its skill (its description doesn't match how you ask), the brief fixes the description, using your real requests as test cases.
 
 If you decline, a background run (every few hours, within $5/month) still learns tasks you repeat 3+ times. It also rates how sessions went. Claude mentions what's ready at the start of your next session. When it can't tell whether a repeated task went well, Claude asks you instead of guessing.
 

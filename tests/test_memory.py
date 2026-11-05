@@ -119,8 +119,11 @@ class Memory(p4.Phase4):
         with mock.patch("sys.stdout", out), mock.patch("sys.stderr", out):
             try:
                 rc = refine.main(list(argv))
-            except SystemExit as e:
+            except SystemExit as e:   # sys.exit("error: ...") carries the message as the code
                 rc = e.code
+                if isinstance(rc, str):
+                    out.write(rc + "\n")
+                    rc = 1
         return rc, out.getvalue()
 
 
@@ -472,6 +475,106 @@ class Memory(p4.Phase4):
         self.assertEqual(json.loads((root / "brief.json").read_text())["improve"]["name"], "csv-skill")
         self.assertEqual(auto.improvements_needed(), [])                  # once per version
         self.assertIn("an update of the skill 'csv-skill'", auto.session_start_context())
+
+    def miss_skill(self, n, request="turn in.csv into json please", start=0):
+        """n sessions after install that did the skill's task without Claude loading the skill."""
+        from hooks.log_session import ingest
+        later = (datetime.now(timezone.utc) + timedelta(minutes=10)).isoformat().replace("+00:00", "Z")
+        sids = []
+        for i in range(start, start + n):
+            sid = f"miss-{i}"
+            tp = Path(skill_use_transcript(self.t / f"{sid}.jsonl", sid, "a,b\n1,2\n", '[{"a": 1, "b": 2}]', later))
+            lines = [json.loads(x) for x in tp.read_text().splitlines()]
+            lines = [x for k, x in enumerate(lines) if k not in (1, 2)]   # no Skill call, no "loaded"
+            lines[0]["message"]["content"] = f"{request} ({i})"
+            tp.write_text("\n".join(json.dumps(x) for x in lines) + "\n")
+            ingest(str(tp), hook_event="SessionEnd", end_reason="other", session_id=sid)
+            self.store.rate(sid, "accepted")
+            sids.append(sid)
+        p = self.store.load_pattern("csv-to-json-conversion")              # the clusterer groups them with it
+        p["session_ids"] = sorted(set(p["session_ids"]) | set(sids))
+        self.store.save_pattern(p)
+        return sids
+
+    def test_missed_triggers_get_a_description_brief(self):
+        from hooks.log_session import ingest
+        from refine import auto, refine
+        self.install_skill()
+        self.use_skill(3)
+        self.miss_skill(1)
+        self.assertEqual(auto.skill_updates_needed(), [])                 # one miss isn't a pattern
+        missed = self.miss_skill(1, start=1)
+        tp = self.t / "other.jsonl"                                       # another task that shares words: a near miss
+        tp.write_text(transcript(self.t / "x.jsonl", "other-1", "x", "y") and Path(self.t / "x.jsonl").read_text()
+                      .replace("Convert in.csv to JSON", "Convert the PDF report into markdown please"))
+        ingest(str(tp), hook_event="SessionEnd", end_reason="other", session_id="other-1")
+        need = auto.skill_updates_needed()
+        self.assertEqual([(n["entry"]["name"], n["failures"], sorted(n["missed"])) for n in need],
+                         [("csv-skill", [], ["miss-0", "miss-1"])])
+        self.assertEqual(auto.brief_improvements(), ["csv-skill"])
+        root = Path(os.environ["LEARNING_HARNESS_INSTALL_ROOT"]) / "briefs" / "csv-skill"
+        brief = (root / "BRIEF.md").read_text()
+        self.assertIn("Claude didn't use it when it should have", brief)
+        self.assertIn("turn in.csv into json please (0)", brief)          # how the user actually asked
+        self.assertIn("leave the body as it is", brief)                   # no corrections: description only
+        self.assertNotIn("had to correct", brief)
+        self.assertIn("LEARNING_HARNESS_DISABLE=1", brief)                # skill-creator's test runs aren't logged
+        evals = json.loads((root / "evals" / "trigger-eval.json").read_text())
+        pos = [e["query"] for e in evals if e["should_trigger"]]
+        neg = [e["query"] for e in evals if not e["should_trigger"]]
+        self.assertTrue({"turn in.csv into json please (0)", "turn in.csv into json please (1)"} <= set(pos))
+        self.assertIn("Convert in.csv to JSON", pos)                      # the uses' phrasing too
+        self.assertEqual(neg, ["Convert the PDF report into markdown please"])
+        meta = json.loads((root / "brief.json").read_text())
+        self.assertEqual(meta["improve"]["reasons"], ["missed"])
+        self.assertIn("its description needs fixing", auto.session_start_context())
+        self.assertEqual(auto.skill_updates_needed(), [])                 # once per version
+        item = next(i for i in refine.build_report()["installed"] if i["name"] == "csv-skill")
+        self.assertTrue(any("fix-triggers csv-skill" in r for r in item["reasons"]))
+        self.assertEqual(sorted(missed), ["miss-1"])
+
+    def test_corrections_and_misses_share_one_brief(self):
+        from refine import auto
+        self.install_skill()
+        self.use_skill(2)
+        self.use_skill(3, outcome="edited", start=2)
+        for i in range(2, 5):
+            self.store.rate(f"use-edited-{i}", "edited", "qty must stay a string")
+        self.assertEqual(auto.brief_improvements(), ["csv-skill"])        # corrections first
+        self.miss_skill(2)                                                # later, misses for the same version
+        need = auto.skill_updates_needed()
+        self.assertTrue(need[0]["failures"] and need[0]["missed"])        # the rewrite keeps the corrections
+        auto.brief_improvements()
+        root = Path(os.environ["LEARNING_HARNESS_INSTALL_ROOT"]) / "briefs" / "csv-skill"
+        brief = (root / "BRIEF.md").read_text()
+        self.assertIn("qty must stay a string", brief)
+        self.assertIn("Claude didn't use it when it should have", brief)
+        self.assertNotIn("leave the body as it is", brief)
+        self.assertEqual(json.loads((root / "brief.json").read_text())["improve"]["reasons"], ["corrections", "missed"])
+
+    def test_fix_triggers_by_hand(self):
+        self.install_skill()
+        rc, out = self.cli_refine("fix-triggers", "csv-skill")
+        self.assertNotEqual(rc, 0); self.assertIn("nothing to fix", out)
+        self.miss_skill(1)                                                # by hand, one miss is enough
+        rc, out = self.cli_refine("fix-triggers", "csv-skill")
+        self.assertEqual(rc, 0, out)
+        self.assertIn("trigger-eval.json", out)
+        rc, out = self.cli_refine("fix-triggers", "nope")
+        self.assertNotEqual(rc, 0)
+
+    def test_a_part_that_used_the_skill_did_not_miss_it(self):
+        from refine import refine
+        from registry import install
+        self.install_skill()
+        sid = self.use_skill(1)[0]
+        from refine.segment import make_segment
+        seg = make_segment(sid, "1")
+        p = self.store.load_pattern("csv-to-json-conversion")
+        p["session_ids"] = sorted(set(p["session_ids"]) | {seg})
+        self.store.save_pattern(p)
+        e = install.load_registry()["installed"]["csv-skill"]
+        self.assertNotIn(seg, refine.missed_opportunities(e, refine.collect_uses(e)))
 
     def test_missing_skill_link_is_repaired(self):
         from registry import install

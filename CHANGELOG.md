@@ -9,7 +9,11 @@ What changed in each version of the learning harness. The format follows
 ### Added
 - **Choose the budget and schedule.** `refine.py auto-config` shows and changes how background learning runs: the monthly budget (`--budget`), how often it runs (`--every 12h`, `90m`, `1d`), how many new sessions it waits for (`--after-sessions`), how many successful repeats a task needs before it's learned (`--learn-after`), drafts per run (`--max-drafts`) and how long old one-off sessions are kept (`--keep-days`). Values are checked, and `--reset` brings back the defaults. You can also ask Claude to change them. The installer takes `--every`, `--after-sessions` and `--learn-after` alongside `--budget`.
 
+- **Skills Claude didn't use get their description fixed.** When 2 or more later sessions do a learned skill's task without Claude loading it, the background run writes an update brief. It lists how you actually asked, and skill-creator fixes the skill's description with its description optimization, using a ready trigger eval set built from your real requests (plus near misses from your other tasks). `refine.py fix-triggers <skill>` does it by hand. Corrections and missed triggers for the same skill share one brief.
+
 ### Fixed
+- A part of a session that used a skill is no longer reported as having missed it.
+- Skill briefs tell Claude to run skill-creator's test runs with `LEARNING_HARNESS_DISABLE=1`, so the harness doesn't log those runs as your sessions and learn from them.
 - Re-running the installer no longer saves the default budget as your own choice, so a better default in a later release still reaches you.
 - A setting you choose with `auto-config` is never mistaken for an old installer's default. Before, choosing a 24-hour cycle would quietly have turned back into 6 hours.
 
