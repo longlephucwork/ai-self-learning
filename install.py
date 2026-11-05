@@ -465,6 +465,22 @@ def builtin_skill_installed() -> bool:
     return (builtin_skill_dir() / BUILTIN_MARK).exists()
 
 
+def refresh_builtin_skill() -> bool:
+    """Rewrite the built-in skill when this version's text differs from the installed one (only ours: it has
+    the marker). Run by the SessionStart hook, so an update reaches it: the update itself runs the old code."""
+    d = builtin_skill_dir()
+    if not builtin_skill_installed():
+        return False
+    text = builtin_skill_text()
+    try:
+        if (d / "SKILL.md").read_text(encoding="utf-8") == text:
+            return False
+    except OSError:
+        pass
+    (d / "SKILL.md").write_text(text, encoding="utf-8")
+    return True
+
+
 def setup_builtin_skill(uninstall: bool = False) -> None:
     d = builtin_skill_dir()
     if uninstall:

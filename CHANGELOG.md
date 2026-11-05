@@ -9,6 +9,9 @@ What changed in each version of the learning harness. The format follows
 ### Added
 - **Learn just one part of a session.** Say "learn the release part" in a long session that also did other work, and only that part is learned. Claude numbers the session's requests (`refine.py learn --list`) and learns the chosen ones (`refine.py learn --requests 7-9 --focus "..."`). The part becomes its own derived session, so the summary, skill brief, test cases and drafted code come from that part only. Only the part is rated `accepted`, and the parent session is left as it was.
 
+### Fixed
+- After an update, the built-in "learn this" skill now gets the new version's instructions at the next session start. Before, `install.py --update` refreshed the hooks but left the skill's old text in place.
+
 ## [0.0.3] - 2026-11-04
 
 ### Added

@@ -206,6 +206,11 @@ def session_start() -> int:
                 parts.append(t)
         except Exception:
             _log_error(traceback.format_exc().replace("\n", " | "))
+    try:   # after an update, bring the built-in "learn this" skill up to this version's text
+        import install
+        install.refresh_builtin_skill()
+    except Exception:
+        _log_error(traceback.format_exc().replace("\n", " | "))
     text = "\n\n".join(parts)
     if text:
         print(json.dumps({"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": text}}))

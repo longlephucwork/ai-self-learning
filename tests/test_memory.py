@@ -433,6 +433,22 @@ class Memory(p4.Phase4):
             (home / ".claude" / "skills" / "learning-harness").mkdir(parents=True)    # someone else's folder
             installer.setup_builtin_skill()
             self.assertFalse((home / ".claude" / "skills" / "learning-harness" / "SKILL.md").exists())
+            self.assertFalse(installer.refresh_builtin_skill())                      # still not ours: untouched
+            self.assertFalse((home / ".claude" / "skills" / "learning-harness" / "SKILL.md").exists())
+
+    def test_session_start_brings_the_builtin_skill_up_to_date(self):
+        """An update runs the old install.py, so the new skill text arrives at the next SessionStart."""
+        import install as installer
+        from hooks import log_session
+        home = self.t / "home"
+        md = home / ".claude" / "skills" / "learning-harness" / "SKILL.md"
+        with mock.patch.dict(os.environ, {"HOME": str(home)}), redirect_stdout(io.StringIO()):
+            installer.setup_builtin_skill()
+            md.write_text("---\nname: learning-harness\ndescription: an older version\n---\n")
+            log_session.session_start()
+            self.assertEqual(md.read_text(), installer.builtin_skill_text())
+            self.assertIn("learn --requests", md.read_text())                       # the new part-learning steps
+            self.assertFalse(installer.refresh_builtin_skill())                      # already current: no write
 
 
     # ---------------- learning while you work ----------------
