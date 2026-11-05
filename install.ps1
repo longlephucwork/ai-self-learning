@@ -1,16 +1,16 @@
 # learning-harness installer launcher for Windows (PowerShell 5.1+).
 #
 #   From a clone:  powershell -ExecutionPolicy Bypass -File install.ps1 [options]   (or double-click install.bat)
-#   One line:      irm https://raw.githubusercontent.com/longlephucwork/claude-learning-harness/main/install.ps1 | iex
+#   One line:      irm https://raw.githubusercontent.com/longlephucwork/ai-self-learning/main/install.ps1 | iex
 #
 # Finds Python 3.10+, clones (or updates) the repo if this script isn't inside one, then runs install.py,
 # which asks before every change. Options are passed through: -- --yes --check --uninstall ...
-# Clone location: $env:LEARNING_HARNESS_DIR (default %USERPROFILE%\claude-learning-harness).
+# Clone location: $env:LEARNING_HARNESS_DIR (default %USERPROFILE%\ai-self-learning; an install from before the rename, in %USERPROFILE%\claude-learning-harness, is kept).
 #
 # Note: native Windows has no network sandbox for generated code, so the installer will ask whether to
 # allow running learned tools without one. For full isolation, install inside WSL with install.sh instead.
 
-$RepoUrl = if ($env:LEARNING_HARNESS_REPO_URL) { $env:LEARNING_HARNESS_REPO_URL } else { "https://github.com/longlephucwork/claude-learning-harness.git" }  # override for forks
+$RepoUrl = if ($env:LEARNING_HARNESS_REPO_URL) { $env:LEARNING_HARNESS_REPO_URL } else { "https://github.com/longlephucwork/ai-self-learning.git" }  # override for forks
 
 $py = $null
 foreach ($cand in @("py -3", "python", "python3")) {
@@ -34,7 +34,10 @@ if ($here -and (Test-Path (Join-Path $here "install.py"))) {
         Write-Host "error: git not found. Install it with:  winget install Git.Git" -ForegroundColor Red
         exit 1
     }
-    $repo = if ($env:LEARNING_HARNESS_DIR) { $env:LEARNING_HARNESS_DIR } else { Join-Path $env:USERPROFILE "claude-learning-harness" }
+    $repo = if ($env:LEARNING_HARNESS_DIR) { $env:LEARNING_HARNESS_DIR } else { Join-Path $env:USERPROFILE "ai-self-learning" }
+    # installed before the repo was renamed: keep using that clone (its hooks and PATH entry point there)
+    $old = Join-Path $env:USERPROFILE "claude-learning-harness"
+    if (-not $env:LEARNING_HARNESS_DIR -and -not (Test-Path $repo) -and (Test-Path (Join-Path $old ".git"))) { $repo = $old }
     if (Test-Path (Join-Path $repo ".git")) {
         Write-Host "already installed in $repo (re-running the installer; to get a new release: python install.py --update)"
     } elseif (Test-Path $repo) {

@@ -20,7 +20,7 @@ Resource limits (CPU, memory, file size) apply on Linux and macOS. The environme
 
 ## Linux
 
-Every test runs on Linux. Open a terminal; run the commands from the repo folder (`~/claude-learning-harness`) unless noted.
+Every test runs on Linux. Open a terminal; run the commands from the repo folder (`~/ai-self-learning`) unless noted.
 
 **1. Prerequisites.** Each should print a version, and Python must be 3.10+:
 ```bash
@@ -54,7 +54,7 @@ python3 install.py --check
 cd ~ && claude mcp get learned
 ```
 
-**6. PATH.** Expect a line ending in `claude-learning-harness/learned/bin` (where wrappers for scripts you approve will go), and your Python's path:
+**6. PATH.** Expect a line ending in `ai-self-learning/learned/bin` (where wrappers for scripts you approve will go), and your Python's path:
 ```bash
 echo "$PATH" | tr ':' '\n' | grep learned/bin
 echo "$LEARNING_HARNESS_PYTHON"
@@ -144,7 +144,7 @@ python install.py --check
 claude mcp get learned
 ```
 
-**5. PATH.** Expect a line ending in `claude-learning-harness\learned\bin` (where wrappers for scripts you approve will go), and the path of `python.exe`:
+**5. PATH.** Expect a line ending in `ai-self-learning\learned\bin` (where wrappers for scripts you approve will go), and the path of `python.exe`:
 ```powershell
 $env:Path -split ';' | Select-String 'learned\\bin'
 $env:LEARNING_HARNESS_PYTHON
@@ -201,16 +201,16 @@ If it doesn't, see step 2 of [Linux](#linux): Ubuntu 24.04's AppArmor restrictio
 
 **4. Install into the Linux filesystem.** Run the Linux one-liner from your WSL home folder:
 ```bash
-cd ~ && curl -fsSL https://raw.githubusercontent.com/longlephucwork/claude-learning-harness/main/install.sh | bash
+cd ~ && curl -fsSL https://raw.githubusercontent.com/longlephucwork/ai-self-learning/main/install.sh | bash
 ```
-It clones to `~/claude-learning-harness`. Don't use a clone under `/mnt/c/...`: the Windows drive is slow from WSL, and file permissions misbehave there (the installer warns). Expected output:
+It clones to `~/ai-self-learning`. Don't use a clone under `/mnt/c/...`: the Windows drive is slow from WSL, and file permissions misbehave there (the installer warns). Expected output:
 - a first line containing `Linux (WSL2)`
 - `[ok]` for Python, git and the Claude Code CLI
 - `[ok] code sandbox: unshare (network blocked ...)`
 - `[ok] self-test: OK`
 - `[ok]` for the hooks, the MCP server and the PATH
 
-**5. Then steps 4–9 of [Linux](#linux).** Run them inside WSL, from `~/claude-learning-harness`: `install.py --check`, `claude mcp get learned` (from `~`), the PATH, session logging, the tests (all run, nothing skipped), and uninstall.
+**5. Then steps 4–9 of [Linux](#linux).** Run them inside WSL, from `~/ai-self-learning`: `install.py --check`, `claude mcp get learned` (from `~`), the PATH, session logging, the tests (all run, nothing skipped), and uninstall.
 
 **6. Which Claude Code sees it.** The hooks and the MCP server are installed for the Claude Code that runs **inside WSL**:
 - in the WSL terminal: `claude`

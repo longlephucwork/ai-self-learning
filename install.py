@@ -166,7 +166,7 @@ def check_prereqs() -> bool:
              "convert it in PowerShell: wsl --set-version <distro> 2")
     if wsl and on_windows_drive(str(REPO)):
         warn(f"the repo is on the Windows drive ({REPO}): slow, and file permissions misbehave there. "
-             "Clone it inside WSL instead (the default: ~/claude-learning-harness)")
+             "Clone it inside WSL instead (the default: ~/ai-self-learning)")
     return good
 
 

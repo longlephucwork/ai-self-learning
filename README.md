@@ -1,4 +1,4 @@
-# claude-learning-harness
+# ai-self-learning
 
 Makes Claude Code learn from your own work. It notices tasks you keep repeating and drafts a reusable **script**, **MCP tool** or **skill** for each one. Nothing is installed until you approve it.
 
@@ -8,27 +8,27 @@ Needs **Python 3.10+**, **git** and **Claude Code**.
 
 ```bash
 # Linux / macOS / WSL
-curl -fsSL https://raw.githubusercontent.com/longlephucwork/claude-learning-harness/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/longlephucwork/ai-self-learning/main/install.sh | bash
 ```
 ```powershell
 # Windows (PowerShell); or double-click install.bat in a clone
-irm https://raw.githubusercontent.com/longlephucwork/claude-learning-harness/main/install.ps1 | iex
+irm https://raw.githubusercontent.com/longlephucwork/ai-self-learning/main/install.ps1 | iex
 ```
 
-The installer clones the repo to `~/claude-learning-harness`, checks your machine, shows what it will set up and asks once: `Install? [Y/n]`. (Use `--custom` to choose each part.) Per-OS notes (including Docker, and Ubuntu 24.04's sandbox setting) are in [docs/testing-installs.md](docs/testing-installs.md).
+The installer clones the repo to `~/ai-self-learning`, checks your machine, shows what it will set up and asks once: `Install? [Y/n]`. (Use `--custom` to choose each part.) Per-OS notes (including Docker, and Ubuntu 24.04's sandbox setting) are in [docs/testing-installs.md](docs/testing-installs.md).
 
 **Set the budget and schedule while installing.** Options go to `install.py`. With `curl | bash`, put them after `bash -s --`:
 
 ```bash
 # Linux / macOS / WSL
-curl -fsSL https://raw.githubusercontent.com/longlephucwork/claude-learning-harness/main/install.sh | bash -s -- --budget 10 --every 12h --after-sessions 2 --learn-after 2
+curl -fsSL https://raw.githubusercontent.com/longlephucwork/ai-self-learning/main/install.sh | bash -s -- --budget 10 --every 12h --after-sessions 2 --learn-after 2
 ```
 
 `irm … | iex` can't pass options, so on Windows run the script as a script block instead:
 
 ```powershell
 # Windows (PowerShell)
-& ([scriptblock]::Create((irm https://raw.githubusercontent.com/longlephucwork/claude-learning-harness/main/install.ps1))) --budget 10 --every 12h --after-sessions 2 --learn-after 2
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/longlephucwork/ai-self-learning/main/install.ps1))) --budget 10 --every 12h --after-sessions 2 --learn-after 2
 ```
 
 From a clone, run `python3 install.py --budget 10 --every 12h` (or `install.ps1` with the same options). What the options mean is under [Budget and schedule](#budget-and-schedule). A bad value is rejected before anything changes, and re-running the installer without them keeps what you set before. To change them later, use `refine.py auto-config`.
@@ -61,7 +61,7 @@ The Claude desktop and web apps don't load these.
 
 **Muscle memory:** a skill you use often and accurately, for a task that's mechanical, gets proposed as a tool (or a script: `refine.py promote <skill> --as script`, or `"promote_as": "script"` in `store/config.json` for the background run). Claude then just calls it instead of reasoning through the task each time. If it starts failing, `refine.py demote` brings the skill back. Tasks that need judgment stay skills.
 
-You can also do it all by hand. Run these from `~/claude-learning-harness` (on Windows, use `python` instead of `python3`):
+You can also do it all by hand. Run these from `~/ai-self-learning` (on Windows, use `python` instead of `python3`):
 
 | Command | What it does |
 |---|---|

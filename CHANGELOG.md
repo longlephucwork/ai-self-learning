@@ -6,6 +6,9 @@ What changed in each version of the learning harness. The format follows
 
 ## [Unreleased]
 
+### Changed
+- **The repository is now `ai-self-learning`** (it was `claude-learning-harness`). The install commands use the new name, and a new install goes into `~/ai-self-learning`. An install from before the rename keeps its folder, `~/claude-learning-harness`: re-running the installer uses it, and updates keep working because GitHub redirects the old address.
+
 ### Added
 - **Choose the budget and schedule.** `refine.py auto-config` shows and changes how background learning runs: the monthly budget (`--budget`), how often it runs (`--every 12h`, `90m`, `1d`), how many new sessions it waits for (`--after-sessions`), how many successful repeats a task needs before it's learned (`--learn-after`), drafts per run (`--max-drafts`) and how long old one-off sessions are kept (`--keep-days`). Values are checked, and `--reset` brings back the defaults. You can also ask Claude to change them. The installer takes `--every`, `--after-sessions` and `--learn-after` alongside `--budget`.
 
@@ -83,8 +86,8 @@ What changed in each version of the learning harness. The format follows
 - Automatic learning in the background, within a monthly budget.
 - Self-update from tagged releases: a daily check, Claude asks first, a safe merge, and rollback.
 
-[Unreleased]: https://github.com/longlephucwork/claude-learning-harness/compare/v0.0.4...HEAD
-[0.0.4]: https://github.com/longlephucwork/claude-learning-harness/compare/v0.0.3...v0.0.4
-[0.0.3]: https://github.com/longlephucwork/claude-learning-harness/compare/v0.0.2...v0.0.3
-[0.0.2]: https://github.com/longlephucwork/claude-learning-harness/compare/v0.0.1...v0.0.2
-[0.0.1]: https://github.com/longlephucwork/claude-learning-harness/releases/tag/v0.0.1
+[Unreleased]: https://github.com/longlephucwork/ai-self-learning/compare/v0.0.4...HEAD
+[0.0.4]: https://github.com/longlephucwork/ai-self-learning/compare/v0.0.3...v0.0.4
+[0.0.3]: https://github.com/longlephucwork/ai-self-learning/compare/v0.0.2...v0.0.3
+[0.0.2]: https://github.com/longlephucwork/ai-self-learning/compare/v0.0.1...v0.0.2
+[0.0.1]: https://github.com/longlephucwork/ai-self-learning/releases/tag/v0.0.1

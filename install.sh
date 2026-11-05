@@ -2,15 +2,15 @@
 # learning-harness installer launcher for Linux and macOS.
 #
 #   From a clone:  ./install.sh [options]
-#   One line:      curl -fsSL https://raw.githubusercontent.com/longlephucwork/claude-learning-harness/main/install.sh | bash
+#   One line:      curl -fsSL https://raw.githubusercontent.com/longlephucwork/ai-self-learning/main/install.sh | bash
 #
 # Finds Python 3.10+, clones (or updates) the repo if this script isn't inside one, then runs install.py,
 # which asks before every change. Options are passed through: --yes --check --uninstall --no-hooks
 # --no-mcp --no-path --skip-tests --allow-unsandboxed. Clone location: $LEARNING_HARNESS_DIR
-# (default ~/claude-learning-harness).
+# (default ~/ai-self-learning; an install from before the rename, in ~/ai-self-learning, is kept).
 set -euo pipefail
 
-REPO_URL="${LEARNING_HARNESS_REPO_URL:-https://github.com/longlephucwork/claude-learning-harness.git}"   # override for forks
+REPO_URL="${LEARNING_HARNESS_REPO_URL:-https://github.com/longlephucwork/ai-self-learning.git}"   # override for forks
 
 find_python() {
   for c in python3 python3.13 python3.12 python3.11 python3.10 python; do
@@ -41,7 +41,11 @@ if [ -n "$here" ] && [ -f "$here/install.py" ]; then
   repo="$here"
 else
   command -v git >/dev/null 2>&1 || { echo "error: git not found" >&2; exit 1; }
-  repo="${LEARNING_HARNESS_DIR:-$HOME/claude-learning-harness}"
+  repo="${LEARNING_HARNESS_DIR:-$HOME/ai-self-learning}"
+  # installed before the repo was renamed: keep using that clone (its hooks and PATH entry point there)
+  if [ -z "${LEARNING_HARNESS_DIR:-}" ] && [ ! -e "$repo" ] && [ -d "$HOME/claude-learning-harness/.git" ]; then
+    repo="$HOME/claude-learning-harness"
+  fi
   if [ -d "$repo/.git" ]; then
     echo "already installed in $repo (re-running the installer; to get a new release: python3 install.py --update)"
   elif [ -e "$repo" ]; then

@@ -319,7 +319,7 @@ class Installer(unittest.TestCase):
         out = io.StringIO()
         with mock.patch.object(install, "wsl_version", return_value="WSL2"), \
                 mock.patch.object(install, "claude_bin", return_value="/mnt/c/Users/me/AppData/Roaming/npm/claude"), \
-                mock.patch.object(install, "REPO", Path("/mnt/c/Users/me/claude-learning-harness")), redirect_stdout(out):
+                mock.patch.object(install, "REPO", Path("/mnt/c/Users/me/ai-self-learning")), redirect_stdout(out):
             good = install.check_prereqs()
         self.assertFalse(good)
         self.assertIn("resolves to the Windows Claude Code", out.getvalue())

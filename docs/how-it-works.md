@@ -202,7 +202,7 @@ Drafts produced overnight still wait for `review/cli.py approve`.
 
 **Register it once:** the installer does this. By hand:
 ```bash
-claude mcp add --scope user learned -- python3 /path/to/claude-learning-harness/mcp_tools/server.py
+claude mcp add --scope user learned -- python3 /path/to/ai-self-learning/mcp_tools/server.py
 ```
 That makes it available in every project. Sessions inside this repo also pick it up from `.mcp.json` (project scope); interactive sessions ask you to approve project servers the first time. Check with `claude mcp list`.
 
