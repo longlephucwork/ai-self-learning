@@ -529,6 +529,13 @@ def main(argv=None):
         print("change settings: python3 refine/refine.py auto-config")
         ok, why = auto.should_run()
         print(f"next run: {'due now' if ok else why}")
+        chk = auto.last_check()
+        if chk:
+            t = auto._ts(chk.get("at"))
+            print(f"last checked: {auto._local(t) if t else chk.get('at')} at {chk.get('event')}: "
+                  + ("started a run" if chk.get("started") else chk.get("reason", "")))
+        print(f"checked: at session start and end, and after replies (at most every "
+              f"{int(auto.CHECK_EVERY.total_seconds() // 60)} min, once the wait is over)")
         lr = st.get("last_result") or {}
         print(f"last successful run: {st.get('last_run_at', 'never')}")
         if st.get("last_error"):

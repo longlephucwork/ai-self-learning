@@ -46,6 +46,7 @@ DEFAULTS = {"enabled": False, "monthly_budget_usd": 5.0, "min_hours_between_runs
             "promote_as": "tool", "memory_days": 30}
 LOCK_STALE_S = 2 * 3600
 RETRY_AFTER_FAILURE = timedelta(hours=1)
+CHECK_EVERY = timedelta(minutes=10)   # the Stop hook (after every reply) checks at most this often
 _children: list = []   # keep spawned runs referenced, so their handles aren't collected while they run
 
 
@@ -173,6 +174,55 @@ def state() -> dict:
     return store.read_json(store.store_dir() / "auto_state.json") or {}
 
 
+def _local(t: datetime) -> str:
+    """A time as the user reads it: local, to the minute."""
+    return t.astimezone().strftime("%Y-%m-%d %H:%M %Z").strip()
+
+
+# ---------------- checks from the session hooks ----------------
+
+def _check_path() -> Path:
+    return store.store_dir() / "auto_check.json"   # apart from auto_state.json, which a run writes
+
+
+def last_check() -> dict:
+    return store.read_json(_check_path()) or {}
+
+
+def _gate(now: datetime) -> bool:
+    """Cheap test for the Stop hook, which fires after every reply: two small file reads, no session scan.
+    False when a run can't be due yet: off, inside the throttle window or a failure's retry wait, or
+    checked less than CHECK_EVERY ago."""
+    cfg, st = config(), state()
+    if not cfg["enabled"]:
+        return False
+    last = _ts(st.get("last_run_at")) if st.get("last_run_at") else None
+    if last and now - last < timedelta(hours=cfg["min_hours_between_runs"]):
+        return False
+    attempt = _ts(st.get("last_attempt_at")) if st.get("last_attempt_at") else None
+    if st.get("last_error") and attempt and now - attempt < RETRY_AFTER_FAILURE:
+        return False
+    checked = _ts(last_check().get("at"))
+    return not (checked and now - checked < CHECK_EVERY)
+
+
+def check_from_hook(event: str, now: datetime | None = None) -> dict | None:
+    """Called by the session hooks: start a detached run when one is due, and record why or why not.
+
+    SessionStart and SessionEnd always check. Stop (after every reply) first passes the cheap _gate, so a
+    long session, or a window left open, still gets a run once the throttle opens. Returns the check
+    recorded, or None when the gate skipped it."""
+    now = now or datetime.now(timezone.utc)
+    if event == "Stop" and not _gate(now):
+        return None
+    ok, why = should_run(now)
+    rec = {"at": now.isoformat(timespec="seconds"), "event": event, "started": False, "reason": why}
+    if ok:
+        rec["started"] = bool(spawn_in_background())
+    store.write_json_atomic(_check_path(), rec)
+    return rec
+
+
 def _ts(s):
     try:
         t = datetime.fromisoformat(str(s).replace("Z", "+00:00"))
@@ -218,7 +268,9 @@ def should_run(now: datetime | None = None) -> tuple[bool, str]:
                        f"{(attempt + RETRY_AFTER_FAILURE).isoformat(timespec='minutes')}")
     last = _ts(st.get("last_run_at")) if st.get("last_run_at") else None
     if last and now - last < timedelta(hours=cfg["min_hours_between_runs"]):
-        return False, f"last run {last.isoformat(timespec='minutes')}; waiting {cfg['min_hours_between_runs']}h"
+        nxt = last + timedelta(hours=cfg["min_hours_between_runs"])
+        return False, (f"last run {_local(last)}; waiting {_hours_text(cfg['min_hours_between_runs'])}, "
+                       f"so the next run is allowed from {_local(nxt)}")
     n = len(new_finished_sessions(st.get("last_run_at")))
     if n < cfg["min_new_sessions"]:
         return False, f"{n} new finished session(s); waiting for {cfg['min_new_sessions']}"

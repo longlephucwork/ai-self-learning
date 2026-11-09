@@ -184,8 +184,11 @@ def hook_main() -> int:
            end_reason=payload.get("reason") if event == "SessionEnd" else None,
            session_id=payload.get("session_id"),
            last_assistant_message=payload.get("last_assistant_message"))
+    if event == "Stop":
+        # a long session, or a window left open, never ends: check here too, so a run isn't starved
+        maybe_start_auto("Stop")
     if event == "SessionEnd":
-        maybe_start_auto()
+        maybe_start_auto("SessionEnd")
         maybe_check_update()
         try:   # keep the repeat-detection index warm, so the next prompt's check is a quick stat() pass
             from harness_lib import similar
@@ -216,7 +219,7 @@ def session_start() -> int:
         print(json.dumps({"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": text}}))
     # SessionEnd doesn't fire when a terminal window is just closed, so start the (throttled, detached)
     # background work from here as well; both return at once and do nothing when not due.
-    maybe_start_auto()
+    maybe_start_auto("SessionStart")
     maybe_check_update()
     return 0
 
@@ -288,13 +291,12 @@ def maybe_check_update() -> None:
         _log_error(traceback.format_exc().replace("\n", " | "))
 
 
-def maybe_start_auto() -> None:
-    """Start a detached automatic-learning run if the throttle allows; never delays the session."""
+def maybe_start_auto(event: str = "SessionEnd") -> None:
+    """Start a detached automatic-learning run if the throttle allows; never delays the session.
+    From Stop (every reply) a cheap gate skips the check until a run could be due (refine/auto.py)."""
     try:
         from refine import auto
-        ok, _ = auto.should_run()
-        if ok:
-            auto.spawn_in_background()
+        auto.check_from_hook(event)
     except Exception:
         _log_error(traceback.format_exc().replace("\n", " | "))
 

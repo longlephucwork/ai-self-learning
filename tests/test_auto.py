@@ -367,11 +367,71 @@ class Auto(unittest.TestCase):
         with mock.patch.object(self.auto, "spawn_in_background") as spawn:
             self.hook({"session_id": "s-fruit", "transcript_path": tp, "hook_event_name": "SessionEnd", "reason": "other"})
             spawn.assert_not_called()                                       # automatic learning is off
+            self.assertIn("off", self.auto.last_check()["reason"])         # ... and the check says so
             self.auto.set_config(enabled=True, min_new_sessions=1)
-            self.hook({"session_id": "s-fruit", "transcript_path": tp, "hook_event_name": "Stop"})
-            spawn.assert_not_called()                                       # not after every turn
             self.hook({"session_id": "s-fruit", "transcript_path": tp, "hook_event_name": "SessionEnd", "reason": "other"})
             spawn.assert_called_once()
+
+    def long_session_day(self, last_run_hours_ago):
+        """The reported case: learning on, within budget, 4 finished sessions since the last run, and the user
+        only keeps replying in one long session, so no session starts or ends."""
+        self.add_sessions(["s-fruit", "s-price", "s-kv"])
+        self.auto.set_config(enabled=True, min_hours_between_runs=2, min_new_sessions=2)
+        last = (datetime.now(timezone.utc) - timedelta(hours=last_run_hours_ago)).isoformat()
+        self.store.write_json_atomic(self.store.store_dir() / "auto_state.json", {"last_run_at": last})
+        for sid in ("s-fruit", "s-price", "s-kv"):                          # they finished after that run
+            rec = self.store.load_session(sid)
+            rec["ended_at"] = datetime.now(timezone.utc).isoformat()
+            self.store.write_json_atomic(self.store.session_dir(sid) / "session.json", rec)
+        c, j, _, _ = SESSIONS["s-fruit"]
+        return transcript(self.t / "long.jsonl", "long-1", c, j)
+
+    def test_a_long_session_still_gets_a_run_once_the_wait_is_over(self):
+        tp = self.long_session_day(last_run_hours_ago=1)
+        with mock.patch.object(self.auto, "spawn_in_background", return_value=True) as spawn:
+            self.hook({"session_id": "long-1", "transcript_path": tp, "hook_event_name": "Stop"})
+            spawn.assert_not_called()                                       # 1h after the last run: not yet
+            st = self.auto.state()
+            st["last_run_at"] = (datetime.now(timezone.utc) - timedelta(hours=3)).isoformat()
+            self.store.write_json_atomic(self.store.store_dir() / "auto_state.json", st)
+            self.hook({"session_id": "long-1", "transcript_path": tp, "hook_event_name": "Stop"})
+            spawn.assert_called_once()                                      # the next reply after it opens
+        chk = self.auto.last_check()
+        self.assertEqual((chk["event"], chk["started"]), ("Stop", True))
+
+    def test_the_reply_check_is_cheap_until_a_run_could_be_due(self):
+        self.long_session_day(last_run_hours_ago=1)
+        scan = mock.patch.object(self.auto, "new_finished_sessions", side_effect=AssertionError("scanned sessions"))
+        with scan, mock.patch.object(self.auto, "spawn_in_background") as spawn:
+            self.assertIsNone(self.auto.check_from_hook("Stop"))            # inside the throttle: two file reads
+            self.auto.set_config(enabled=False)
+            self.assertIsNone(self.auto.check_from_hook("Stop"))            # off
+            spawn.assert_not_called()
+        self.auto.set_config(enabled=True, min_new_sessions=9)              # open, but not enough sessions yet
+        st = self.auto.state()
+        st["last_run_at"] = (datetime.now(timezone.utc) - timedelta(hours=3)).isoformat()
+        self.store.write_json_atomic(self.store.store_dir() / "auto_state.json", st)
+        with mock.patch.object(self.auto, "spawn_in_background") as spawn:
+            self.assertIn("waiting for 9", self.auto.check_from_hook("Stop")["reason"])
+            with scan:
+                self.assertIsNone(self.auto.check_from_hook("Stop"))        # checked < 10 min ago: skipped
+            self.assertEqual(self.auto.check_from_hook("SessionEnd")["event"], "SessionEnd")   # start/end always check
+            spawn.assert_not_called()
+
+    def test_waiting_says_when_the_next_run_is_allowed(self):
+        self.long_session_day(last_run_hours_ago=1)
+        ok, why = self.auto.should_run()
+        self.assertFalse(ok)
+        self.assertIn("waiting 2h, so the next run is allowed from", why)
+        self.auto.check_from_hook("SessionStart")
+        from refine import refine
+        out = io.StringIO()
+        with redirect_stdout(out):
+            refine.main(["auto-status"])
+        self.assertIn("next run is allowed from", out.getvalue())
+        self.assertIn("last checked:", out.getvalue())
+        self.assertIn("at SessionStart:", out.getvalue())
+        self.assertIn("after replies", out.getvalue())
 
     def test_session_start_also_starts_a_due_run(self):
         """A closed terminal window skips SessionEnd; the next SessionStart catches up."""
