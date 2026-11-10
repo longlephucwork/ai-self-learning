@@ -49,7 +49,7 @@ Without it the installer still works, but validation and MCP tools refuse to run
 python3 install.py --check
 ```
 
-**5. MCP server.** Run this outside the repo folder, so the repo's own `.mcp.json` doesn't answer instead. Expect `Scope: User config (available in all your projects)`, `Status: √ Connected` and your Python as the command:
+**5. MCP server.** Expect `Scope: User config (available in all your projects)`, `Status: √ Connected` and your Python as the command:
 ```bash
 cd ~ && claude mcp get learned
 ```

@@ -5,9 +5,8 @@ Not a network service. Claude Code starts this script as a child process when a
 session begins and talks to it over stdin/stdout (newline-delimited JSON-RPC 2.0,
 the MCP stdio transport). It exits when Claude Code closes the pipe.
 
-Register it once:
-  claude mcp add --scope user learned -- python3 /path/to/learning-harness/mcp_tools/server.py
-or rely on this repo's .mcp.json (project scope).
+Register it once (install.py does this, with the full path to your Python):
+  claude mcp add --scope user learned -- python3 /path/to/ai-self-learning/mcp_tools/server.py
 
 Per call it validates the arguments against the tool's schema, runs the tool
 sandboxed in the project directory ($CLAUDE_PROJECT_DIR, else cwd), and appends a

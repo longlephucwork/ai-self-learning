@@ -55,7 +55,7 @@ python3 review/cli.py show last
 python3 review/cli.py rate <id-prefix|last> accepted|edited|redone|unknown --note "..."
 python3 -m unittest discover -s tests -t .
 ```
-This repo's own `.claude/settings.json` logs sessions run inside the repo through `$CLAUDE_PROJECT_DIR`.
+The repo has no project-level hooks or MCP config of its own. The installer's user-level hooks and MCP server cover every project, this repo included, and they run your Python by its full path. A bare `python3` in a project file fails on Windows, where `python3` is often the Microsoft Store placeholder, and would also run every hook twice inside the repo.
 
 ### Data handling
 `store/` is git-ignored: session data never goes into git. Thinking-block signatures are dropped from the copies. Tool inputs are truncated to 2000 chars and result previews to 500 chars in the DB. The full redacted transcript is kept in the gzip copy.
@@ -204,7 +204,7 @@ Drafts produced overnight still wait for `review/cli.py approve`.
 ```bash
 claude mcp add --scope user learned -- python3 /path/to/ai-self-learning/mcp_tools/server.py
 ```
-That makes it available in every project. Sessions inside this repo also pick it up from `.mcp.json` (project scope); interactive sessions ask you to approve project servers the first time. Check with `claude mcp list`.
+That makes it available in every project, this repo included. Check with `claude mcp list`.
 
 **What it does:**
 - `tools/list` returns the `tool` entries in `learned/registry.json`, with their schema and a description that says how many past sessions they were learned from. The registry is re-read on every request, and a `notifications/tools/list_changed` message is sent when it changes, so approving or uninstalling a tool reaches running sessions.
