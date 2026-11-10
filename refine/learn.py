@@ -95,16 +95,32 @@ def learn(session: str | None = None, *, requests: str | None = None, focus: str
         pattern["session_ids"] = sorted(set(pattern.get("session_ids", [])) | {sid} | set(prior))
     else:
         key = slugify(summ["task_family"])
-        if store.load_pattern(key):
-            key = f"{key}-{sid[:8]}"
-        det = bool(s.get("deterministic"))
-        pattern = {"key": key, "label": key.replace("-", " "), "description": s.get("intent", ""),
-                   "status": "candidate", "n_sessions": 1 + len(prior), "n_success": 1, "min_success": 1,
-                   "success_outcomes": ["accepted", "edited"], "deterministic_frac": 1.0 if det else 0.0,
-                   "suggested_type": "script" if det else "skill",
-                   "type_rationale": f"quick learn from one session; {s.get('deterministic_reason', '')}",
-                   "session_ids": sorted({sid, *prior}), "excluded_injection": [], "method": "quick", "quick": True,
-                   "created_at": store.now(), "updated_at": store.now()}
+        same = store.load_pattern(key)
+        if same and same["status"] in ("installed", "proposed", "briefed"):
+            # the same task, already being learned (e.g. a session fixing that skill): don't split it into a
+            # second pattern. Its session joins the task's evidence instead.
+            same["session_ids"] = sorted(set(same.get("session_ids", [])) | {sid})
+            store.save_pattern(same)
+            raise LearnError(f"this is the task {key!r}, which is already {same['status']}; added this session to "
+                             f"its evidence instead of learning it twice"
+                             + (f". Its skill brief is waiting in learned/briefs/{same['brief']}/"
+                                if same["status"] == "briefed" and same.get("brief") else ""))
+        if same and same["status"] in ("forming", "candidate"):   # the same task, not learned yet: join it
+            pattern = same
+            pattern["status"] = "candidate"
+            pattern["quick"] = True
+            pattern["session_ids"] = sorted(set(pattern.get("session_ids", [])) | {sid} | set(prior))
+        else:
+            if same:   # rejected or retired: learning it again is a fresh start
+                key = f"{key}-{sid[:8]}"
+            det = bool(s.get("deterministic"))
+            pattern = {"key": key, "label": key.replace("-", " "), "description": s.get("intent", ""),
+                       "status": "candidate", "n_sessions": 1 + len(prior), "n_success": 1, "min_success": 1,
+                       "success_outcomes": ["accepted", "edited"], "deterministic_frac": 1.0 if det else 0.0,
+                       "suggested_type": "script" if det else "skill",
+                       "type_rationale": f"quick learn from one session; {s.get('deterministic_reason', '')}",
+                       "session_ids": sorted({sid, *prior}), "excluded_injection": [], "method": "quick",
+                       "quick": True, "created_at": store.now(), "updated_at": store.now()}
     store.save_pattern(pattern)
     from refine.synapse import remember
     remember(pattern["session_ids"])   # relearning a forgotten task brings its sessions back

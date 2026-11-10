@@ -17,6 +17,15 @@ What changed in each version of the learning harness. The format follows
 - **Memory like a brain's.** Repeated work builds a path that strengthens with every successful repeat and fades without one. Spaced practice (repeats on later days) makes a path last longer than massed practice. A task that fades before it's learned is forgotten, so its pattern and sessions are cleaned up instead of being kept forever. A learned task is in long-term memory, where it fades more slowly and every use counts as rehearsal. `refine.py memory` shows every path, `refine.py report` shows each learned item's, and `auto-config --memory-days` sets how fast unpractised tasks fade. When a task is learned still follows `--learn-after`.
 
 ### Fixed
+- **Skills stuck after a failed `adopt` are no longer silent.** A skill built with skill-creator that failed the checks was never revisited or mentioned again, so it was never installed, tracked or improved. The session start note and `auto-status` now list stuck skills with their problems, weekly until they're fixed.
+- **Fewer false safety flags on skills.** These are now shown as information instead of blocking:
+  - a script's `#!/usr/bin/env` first line (the harness's own eval fixtures had it);
+  - a skill mentioning its own `~/.claude/skills/` folder;
+  - `curl` or URLs that only reach `localhost`, such as a health check.
+
+  Claude's credentials and settings files, and any remote network use, still block. `review` and `approve` now scan the same files `adopt` does, so the harness's own eval fixtures are no longer flagged.
+- **A hand-made copy of a learned skill no longer blocks it for good.** A folder in `~/.claude/skills/` with a learned skill's name that the harness didn't install is reported as not tracked. `approve <name> --replace-unmanaged` moves it to `store/replaced/` and installs the tracked version. Skill briefs now say not to copy a skill there by hand.
+- "Learn this" on a session of a task that's already being learned (for example, one fixing that skill) adds the session to that task, instead of creating a second copy of the task under a new name.
 - **Background learning no longer waits for a session to start or end.** It used to check only then, so a long session, or a window left open all day, could go without a run even after the wait was over. Now it's also checked after replies. A cheap gate keeps that to two small file reads per reply until a run could be due, and the full check runs at most every 10 minutes. `refine.py auto-status` shows when the next run is allowed and what the last check found.
 - A part of a session that used a skill is no longer reported as having missed it.
 - Skill briefs tell Claude to run skill-creator's test runs with `LEARNING_HARNESS_DISABLE=1`, so the harness doesn't log those runs as your sessions and learn from them.

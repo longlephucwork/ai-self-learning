@@ -112,7 +112,7 @@ If validation passes, the pattern's status becomes `proposed` and it waits for P
 | Structure | Relative paths only (no `..`, absolute or `~`), allowed extensions `.py .md .json .txt`, at most 6 files. A script or tool needs a `.py` entrypoint, and a tool needs a valid JSON Schema. A pattern under 50% deterministic can't become a script or tool. |
 | Provenance | A `logged` test's input files and expected outputs must appear in that session's redacted transcript (whitespace and `cat -n` prefixes ignored, JSON compared structurally). A `derived_from_feedback` test needs logged inputs and a rating note on that session. `synthetic` tests are allowed but don't count toward coverage. |
 | Coverage | Logged or derived tests must cover at least `min(3, successful sessions)` successful sessions. |
-| Safety scan (`harness_lib/scan.py`) | AST/regex flags for network, subprocess/eval, environment or credential access, deletion, and absolute or parent paths. Any of these fails validation and is shown to the reviewer. `write_any` is informational only. |
+| Safety scan (`harness_lib/scan.py`) | AST/regex flags for network, subprocess/eval, environment or credential access, deletion, and absolute or parent paths. Any of these fails validation and is shown to the reviewer. Informational only, shown but not blocking: `write_any`; `network_local` (curl, wget or URLs that only reach `localhost`, `127.0.0.1` or `::1`, e.g. a health check); `claude_path` (a mention of a `.claude` folder, such as where a skill is installed). Claude's credentials and settings files (`.claude.json`, `.claude/.credentials.json`, `.claude/settings*.json`) are still `secrets`. A script's `#!/usr/bin/env <interpreter>` first line isn't counted as reading the environment. A skill's `evals/` (test fixtures the harness writes) aren't scanned, in `adopt`, `review` and `approve` alike. |
 | Sandbox (`validate/replay.py`) | Each test runs in a fresh temp dir under `unshare -rn` (no network), with `python3 -I`, an environment of only `PATH`/`LANG`/`HOME`, CPU 10s, 512MB memory, 10MB max file size and a 20s timeout. If network isolation is unavailable, it refuses to run unless `--allow-no-netns` is passed. |
 
 **Skills are built with skill-creator, never drafted by the harness** (see [Skill briefs](#skill-briefs-refinebriefpy)). `propose.py` refuses skill patterns and skill-type output. When you `adopt` a skill that skill-creator built, it's validated like this, because a skill is instructions rather than code:
@@ -378,14 +378,18 @@ learned/briefs/<name>/
 ```
 
 1. **Offer.** At your next session start, or straight after "learn this", Claude mentions the brief and offers to build the skill with skill-creator. If skill-creator isn't installed, Claude says so, and the brief waits.
-2. **Build.** If you say yes, Claude follows skill-creator's own process in your session, with `BRIEF.md` as the captured intent (its evidence is marked as data, not instructions) and the brief's `evals/` as the test cases. It writes the skill into `learned/generated/<name>/files/`.
+2. **Build.** If you say yes, Claude follows skill-creator's own process in your session, with `BRIEF.md` as the captured intent (its evidence is marked as data, not instructions) and the brief's `evals/` as the test cases. It writes the skill into `learned/generated/<name>/files/`, and never into `~/.claude/skills/` by hand: a copy put there is loaded by Claude Code but isn't tracked, so its corrections never lead to an update, and it blocks the tracked install.
 3. **Adopt.** `review/cli.py adopt <name>` checks the skill:
    - the Claude skill standard, plus skill-creator's own `quick_validate.py` when installed
    - the safety scan, before any paid check
    - the judged check against your accepted sessions
    
    It then makes the skill a normal draft. Bundled scripts don't need harness tests, because skill-creator's evals cover them, but they still go through the safety scan.
+   If the checks fail, the skill is **stuck**: its task is `briefed`, so the background run doesn't revisit it. The session start note and `refine.py auto-status` list stuck skills with their problems, and repeat weekly until the skill is fixed and adopted.
 4. **Approve** as usual. It's linked into `~/.claude/skills/`, and usage tracking, promotion to a tool and retirement work as for any learned item.
+   - If `~/.claude/skills/<name>` already holds a folder the harness didn't put there, for example a copy made by hand, `approve` won't overwrite it. `approve <name> --replace-unmanaged`, or a yes when asked in a terminal, moves it to `store/replaced/` (kept, not deleted) and installs the tracked version.
+   - Such copies are reported too: the session start note and `auto-status` say when a folder in `~/.claude/skills/` carries a learned task's name but isn't tracked.
+   - Saying "learn this" on a session of a task that's already being learned adds the session to that task's evidence, instead of starting a second copy of the task.
 
 Updating an installed skill works the same way, and happens on its own (see *Learning while you work*). By hand, `refine.py revise <skill>` writes an "update this skill" brief for skill-creator's *improving an existing skill* flow, listing the observed failures.
 

@@ -162,7 +162,10 @@ def cmd_review(args):
     print("\n== spec")
     print(textwrap.fill(proposal["spec"], 100, initial_indent="  ", subsequent_indent="  "))
 
-    flags = scan_files(files)  # re-scan what is on disk now
+    # re-scan what is on disk now: the same files validation scans (a skill's evals/ are test fixtures the harness
+    # wrote, never run as part of the skill)
+    scanned = {k: v for k, v in files.items() if not (proposal["type"] == "skill" and k.startswith("evals/"))}
+    flags = scan_files(scanned)
     print("\n== safety scan")
     bl = blocking(flags)
     print("  BLOCKING: " + ("none" if not bl else ""))
@@ -246,7 +249,8 @@ def cmd_approve(args):
 
     print("re-validating the draft as it is on disk now ...")
     rep = replay.validate_draft(proposal, files, pattern, previous=store.read_json(d / "validation.json"))
-    bl = blocking(scan_files(files))
+    bl = blocking(scan_files({k: v for k, v in files.items()   # the files validation scans: not a skill's evals/
+                              if not (proposal["type"] == "skill" and k.startswith("evals/"))}))
     for f in bl:
         msg = f"safety scan: {f['kind']} in {f['file']}:{f['line']} ({f['detail']})"
         if msg not in rep["problems"]:
@@ -268,8 +272,23 @@ def cmd_approve(args):
     print(f"  learned from {ev['n_sessions']} sessions ({ev['n_success']} successful); "
           f"{sum(t['passed'] for t in rep['tests'])}/{len(rep['tests'])} sandbox tests passed; "
           f"files: {', '.join(sorted(files))}")
+    occupied = reg.unmanaged_link(proposal["name"]) if proposal["type"] == "skill" else None
     if proposal["type"] == "skill":
         print(f"  and symlink {reg.skills_link_dir() / proposal['name']} -> it (Claude Code will load this skill)")
+    if occupied:
+        print(f"  {occupied} is already there, and the harness didn't install it (a copy made by hand?).")
+        if args.replace_unmanaged:
+            print("  It will be moved to store/replaced/ (kept, not deleted), and the tracked version installed.")
+        elif args.yes or not sys.stdin.isatty():
+            print("not approved: add --replace-unmanaged to move it to store/replaced/ and install the tracked "
+                  "version in its place", file=sys.stderr)
+            return 1
+        elif input("  Move it to store/replaced/ (kept, not deleted) and install the tracked version? [y/N] ") \
+                .strip().lower() in ("y", "yes"):
+            args.replace_unmanaged = True
+        else:
+            print("cancelled; nothing installed")
+            return 1
     if proposal["type"] == "tool":
         how = f"wraps the installed script {proposal['wraps']['script']}" if proposal.get("wraps") else "new code"
         print(f"  served by the MCP server as mcp__learned__{proposal['name']} ({how})")
@@ -286,12 +305,15 @@ def cmd_approve(args):
             print("cancelled; nothing installed")
             return 1
     try:
-        e = reg.install(proposal, files, draft_dir=d, note=args.note, validation=rep, use_git=not args.no_git)
+        e = reg.install(proposal, files, draft_dir=d, note=args.note, validation=rep, use_git=not args.no_git,
+                        replace_unmanaged=bool(getattr(args, "replace_unmanaged", False)))
     except reg.InstallError as err:
         print(f"not installed: {err}", file=sys.stderr)
         return 1
     print(f"installed {e['type']} {e['name']} v{e['version']} at {e['path']}" +
           (f" (commit {e['commit']})" if e.get("commit") else ""))
+    if e.get("replaced_unmanaged"):
+        print(f"the folder that was there before is kept at {e['replaced_unmanaged']}")
     from refine import memory
     retired = memory.after_approve(proposal)
     if retired:
@@ -400,7 +422,11 @@ def main(argv=None):
     p = sub.add_parser("revalidate"); p.add_argument("draft"); p.set_defaults(fn=cmd_revalidate)
     p = sub.add_parser("approve"); p.add_argument("draft"); p.add_argument("--note")
     p.add_argument("--yes", action="store_true", help="skip the interactive confirmation")
-    p.add_argument("--no-git", action="store_true"); p.set_defaults(fn=cmd_approve)
+    p.add_argument("--no-git", action="store_true")
+    p.add_argument("--replace-unmanaged", action="store_true",
+                   help="if ~/.claude/skills/<name> holds a copy the harness didn't install, move it to "
+                        "store/replaced/ and install the tracked version")
+    p.set_defaults(fn=cmd_approve)
     p = sub.add_parser("adopt", help="turn a skill built with skill-creator from a brief into a draft")
     p.add_argument("brief"); p.add_argument("--from", dest="source", help="skill folder, if not the brief's target")
     p.set_defaults(fn=cmd_adopt)

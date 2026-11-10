@@ -101,6 +101,21 @@ class Memory(p4.Phase4):
             learn(sid2, log=lambda *_: None)
         self.assertIn("prompt injection", str(e.exception))
 
+    def test_quick_learn_doesnt_split_a_task_already_being_learned(self):
+        """A session fixing a learned skill is the same task: it joins its evidence, not a new -xxxxxxxx task."""
+        from refine.learn import LearnError, learn
+        self.store.save_pattern({"key": "csv-to-json-conversion", "label": "csv", "description": "",
+                                 "status": "briefed", "brief": "csv-to-json-conversion", "session_ids": ["s-fruit"],
+                                 "success_outcomes": ["accepted", "edited"], "suggested_type": "skill"})
+        sid, _, _ = self.fresh_session("q-fix")
+        with mock.patch("harness_lib.similar.similar_sessions", return_value=[]), \
+                self.assertRaises(LearnError) as e:
+            learn(sid, log=lambda *_: None)
+        self.assertIn("already briefed", str(e.exception))
+        self.assertIn(sid, self.store.load_pattern("csv-to-json-conversion")["session_ids"])
+        self.assertEqual([p["key"] for p in self.store.iter_patterns()
+                          if p["key"].startswith("csv-to-json-conversion-")], [])     # no second copy of the task
+
     def test_quick_learn_judgment_task_becomes_a_skill(self):
         sid, _, _ = self.fresh_session("q-skill", request_csv=False)
         from refine.learn import learn

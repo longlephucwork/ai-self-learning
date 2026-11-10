@@ -544,6 +544,13 @@ def main(argv=None):
             print(f"last run spent ${lr.get('spent_usd', 0):.3f}")
         for i in auto.inbox():
             print(f"waiting for you: {i['type']} {i['draft']}  ->  python3 review/cli.py review {i['draft']}")
+        for x in auto.stuck_skills():
+            print(f"STUCK: skill {x['name']} was built but failed its checks, so it isn't installed or tracked: "
+                  + "; ".join(x["problems"][:3]) + f"  (fix it, then: python3 review/cli.py adopt {x['name']})")
+        for c in auto.unmanaged_skill_copies():
+            print(f"NOT TRACKED: {c['path']} is a copy of the learned skill {c['name']} that the harness didn't "
+                  f"install; its use isn't tracked and it won't be improved (approve the draft with "
+                  f"--replace-unmanaged to swap in the tracked version)")
         return 0
     elif a.cmd == "expose":
         from harness_lib.claude_cli import ClaudeError

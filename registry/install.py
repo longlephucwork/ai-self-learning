@@ -242,8 +242,28 @@ def target_dir(kind: str, name: str) -> Path:
     raise InstallError(f"unknown artifact type {kind!r}")
 
 
+def unmanaged_link(name: str) -> Path | None:
+    """~/.claude/skills/<name> when something the harness didn't put there occupies it (a folder copied or made
+    by hand, or a link pointing elsewhere); None when it's free or ours."""
+    link = skills_link_dir() / name
+    if not (link.exists() or link.is_symlink()):
+        return None
+    dest = target_dir("skill", name)
+    ours = (link.is_symlink() and link.resolve() == dest.resolve()) or (link / COPY_MARKER).exists()
+    return None if ours else link
+
+
+def set_aside(link: Path) -> Path:
+    """Move an unmanaged skill folder out of Claude Code's way, into store/replaced/ (kept, never deleted)."""
+    from datetime import datetime, timezone
+    backup = store.store_dir() / "replaced" / f"{link.name}-{datetime.now(timezone.utc):%Y%m%dT%H%M%SZ}"
+    backup.parent.mkdir(parents=True, exist_ok=True)
+    shutil.move(str(link), str(backup))
+    return backup
+
+
 def install(proposal: dict, files: dict[str, str], *, draft_dir: Path, note: str | None,
-            validation: dict, use_git: bool = True) -> dict:
+            validation: dict, use_git: bool = True, replace_unmanaged: bool = False) -> dict:
     """Install exactly `files` (the bytes that were just validated). Caller has the human approval."""
     if use_git and not git_available():
         raise InstallError(f"{install_root()} is not a git repository; refusing to install without "
@@ -260,12 +280,14 @@ def install(proposal: dict, files: dict[str, str], *, draft_dir: Path, note: str
         wrapped = reg["installed"].get(proposal["wraps"]["script"])
         if not wrapped or wrapped["type"] != "script":
             raise InstallError(f"tool wraps {proposal['wraps']['script']!r}, which is not an installed script")
-    link = None
+    link = replaced = to_replace = None
     if kind == "skill":
         link = skills_link_dir() / name
-        ours = (link.is_symlink() and link.resolve() == dest.resolve()) or (link / COPY_MARKER).exists()
-        if (link.exists() or link.is_symlink()) and not ours:
-            raise InstallError(f"{link} already exists and is not ours; not overwriting it")
+        to_replace = unmanaged_link(name)
+        if to_replace and not replace_unmanaged:
+            raise InstallError(f"{link} already exists and the harness didn't install it (a copy made by hand?); "
+                               f"not overwriting it. To back it up to store/replaced/ and install the tracked "
+                               f"version: approve {name} --replace-unmanaged")
 
     # Write the new version into place (replace the folder wholesale; git keeps the old one).
     tmp = dest.with_name(f".{name}.installing")
@@ -281,6 +303,8 @@ def install(proposal: dict, files: dict[str, str], *, draft_dir: Path, note: str
     dest.parent.mkdir(parents=True, exist_ok=True)
     store._replace(str(tmp), dest)  # retried on Windows (e.g. a virus scanner holding the folder)
     if link is not None:
+        if to_replace:
+            replaced = set_aside(to_replace)   # only now that the new version is in place
         _link_skill(dest, link)
 
     pattern = store.load_pattern(proposal["pattern_key"]) or {}
@@ -290,6 +314,7 @@ def install(proposal: dict, files: dict[str, str], *, draft_dir: Path, note: str
         "path": dest.relative_to(install_root()).as_posix(),
         "entrypoint": proposal.get("entrypoint"),
         "symlink": str(link) if link else None,
+        **({"replaced_unmanaged": str(replaced)} if replaced else {}),
         "description": proposal["description"],
         "files": file_hashes(files),
         "evidence": {"n_sessions": pattern.get("n_sessions"), "n_success": pattern.get("n_success"),

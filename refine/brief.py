@@ -260,6 +260,9 @@ def write_brief(pattern_key: str, *, improve: dict | None = None) -> dict:
     lines += ["## Requirements", "",
               f"- Name: `{name}`. Write the skill folder's files into `{target.as_posix()}/` "
               "(SKILL.md at its top level, plus scripts/, references/, evals/ as needed).",
+              ("- Don't copy or package the skill into `~/.claude/skills/` (or a project's `.claude/skills/`) yourself, "
+               "even to try it out: `approve` installs it there. A copy put there by hand is loaded by Claude Code "
+               "but isn't tracked, so its corrections never lead to an update, and it blocks the tracked install."),
               "- Meet the Claude skill standard (skill-creator's quick_validate.py): frontmatter with `name` and "
               "`description`, the description under 1024 characters with no angle brackets, the body under 500 lines.",
               "- Put deterministic, repeated work into scripts/ so the skill keeps only the judgment.",

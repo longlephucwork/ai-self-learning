@@ -7,6 +7,10 @@ Flags (reported to the reviewer; Phase 4 shows them before approval):
   delete      file/directory removal
   abs_path    absolute filesystem paths or parent-directory escapes
   write_any   (info) opens files for writing; expected for most scripts
+  network_local (info) curl/wget or URLs that only reach this machine (localhost, 127.0.0.1, ::1)
+  claude_path (info) mentions a .claude folder, e.g. where a skill is installed. Claude's credentials and
+              settings files (.claude.json, .claude/.credentials.json, .claude/settings*.json) are `secrets`.
+A script's first line `#!/usr/bin/env <interpreter>` is not an environment read.
 For Python the scan walks the AST; for other files it uses regexes.
 """
 from __future__ import annotations
@@ -22,7 +26,19 @@ OS_EXEC = {"system", "popen", "spawnl", "spawnv", "spawnve", "execv", "execve", 
 OS_DELETE = {"remove", "unlink", "rmdir", "removedirs"}
 SHUTIL_DELETE = {"rmtree", "move"}
 SECRET_PATTERNS = re.compile(r"(\.ssh|\.aws|\.netrc|\.gnupg|\.config/gcloud|id_rsa|id_ed25519|keychain|"
-                             r"credentials|\.env\b|/etc/passwd|/etc/shadow|\.claude)", re.I)
+                             r"credentials|\.env\b|/etc/passwd|/etc/shadow|\.claude\.json|\.claude[/\\]\.?credentials|"
+                             r"\.claude[/\\]settings)", re.I)
+CLAUDE_PATH = re.compile(r"\.claude\b")
+SHEBANG = re.compile(r"#!\s*/[\w./-]+(\s+[\w.+-]+)?\s*")   # #!/usr/bin/env bash, #!/bin/sh
+URL_HOST = re.compile(r"https?://(\[[^\]]*\]|[^/\s\"'`:?#]+)", re.IGNORECASE)
+LOCAL_HOSTS = {"localhost", "127.0.0.1", "0.0.0.0", "[::1]", "::1"}
+REMOTE_TOOLS = re.compile(r"\b(nc|ncat|ssh|scp|rsync)\b", re.IGNORECASE)
+
+
+def _local_only(line: str) -> bool:
+    """The line's network use stays on this machine: every URL is localhost, and no remote-shell tool."""
+    hosts = [h.lower() for h in URL_HOST.findall(line)]
+    return bool(hosts) and all(h in LOCAL_HOSTS for h in hosts) and not REMOTE_TOOLS.search(line)
 
 TEXT_RULES = [
     ("network", re.compile(r"\b(curl|wget|nc|ncat|ssh|scp|rsync)\b|https?://", re.I)),
@@ -87,7 +103,9 @@ def scan_python(path: str, src: str) -> list[dict]:
             if re.match(r"^(/|~/|[A-Za-z]:\\)", v) and len(v) > 1 and "\n" not in v:
                 _flag(out, "abs_path", path, ln, f"absolute path {v[:60]!r}")
             if re.search(r"https?://", v):
-                _flag(out, "network", path, ln, f"URL {v[:60]!r}")
+                _flag(out, "network_local" if _local_only(v) else "network", path, ln, f"URL {v[:60]!r}")
+            elif CLAUDE_PATH.search(v) and not SECRET_PATTERNS.search(v):
+                _flag(out, "claude_path", path, ln, f"string mentions {v[:60]!r}")
             if ".." in v.split("/"):
                 _flag(out, "abs_path", path, ln, f"parent-directory path {v[:60]!r}")
     return out
@@ -96,10 +114,17 @@ def scan_python(path: str, src: str) -> list[dict]:
 def scan_text(path: str, src: str) -> list[dict]:
     out: list[dict] = []
     for i, line in enumerate(src.splitlines(), 1):
+        if i == 1 and SHEBANG.fullmatch(line):
+            continue   # #!/usr/bin/env bash: picks the interpreter, reads nothing
         for kind, rx in TEXT_RULES:
             m = rx.search(line)
-            if m:
-                _flag(out, kind, path, i, f"matches {m.group(0)!r}")
+            if not m:
+                continue
+            if kind == "network" and _local_only(line):
+                kind = "network_local"
+            _flag(out, kind, path, i, f"matches {m.group(0)!r}")
+        if CLAUDE_PATH.search(line) and not SECRET_PATTERNS.search(line):
+            _flag(out, "claude_path", path, i, "mentions a .claude folder")
     return out
 
 
