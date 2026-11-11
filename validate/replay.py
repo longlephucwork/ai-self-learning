@@ -492,8 +492,8 @@ def validate_skill(proposal: dict, files: dict[str, str], pattern: dict, *, allo
     rep["official_check"] = official_skill_check(files)
     if rep["official_check"]["ran"] and not rep["official_check"]["valid"]:
         P.append(f"skill-creator's quick_validate.py: {rep['official_check']['message']}")
-    from harness_lib.scan import blocking, scan_files   # before any paid judge call
-    for f in blocking(scan_files({k: v for k, v in files.items() if not k.startswith("evals/")})):
+    from harness_lib.scan import blocking, scan_artifact   # before any paid judge call
+    for f in blocking(scan_artifact("skill", files)):
         P.append(f"safety scan: {f['kind']} in {f['file']}:{f['line']} ({f['detail']})")
     for ref in set(re.findall(r"(?<![\w.-])(scripts/[\w./-]+\.\w+)", skill)):
         if ref not in files:

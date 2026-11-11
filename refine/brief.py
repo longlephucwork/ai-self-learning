@@ -196,6 +196,17 @@ def trigger_eval(pattern: dict, positives: list[str]) -> list[dict]:
     return out
 
 
+def _network_rule() -> str:
+    """The harness's network gate for skills, as a requirement skill-creator can follow."""
+    from harness_lib.scan import allowed_hosts
+    hosts = allowed_hosts()
+    return ("- Network: `curl`, `wget`, `ssh`, `scp` and `rsync` may only reach localhost"
+            + (f" or these hosts the user allowed: {', '.join(hosts)}" if hosts else "")
+            + ". Write each target literally (`curl http://localhost:8080/health`, not `curl \"$URL\"`, which can't "
+            "be checked), don't pipe a download into a shell, and don't use nc/ncat. Anything else fails the "
+            "harness's safety check.")
+
+
 def write_brief(pattern_key: str, *, improve: dict | None = None) -> dict:
     """Write learned/briefs/<name>/ for a pattern. `improve`: an installed skill to update, with the uses the
     user had to correct (`failures`) and the sessions that did its task without Claude using it (`missed`)."""
@@ -266,6 +277,7 @@ def write_brief(pattern_key: str, *, improve: dict | None = None) -> dict:
               "- Meet the Claude skill standard (skill-creator's quick_validate.py): frontmatter with `name` and "
               "`description`, the description under 1024 characters with no angle brackets, the body under 500 lines.",
               "- Put deterministic, repeated work into scripts/ so the skill keeps only the judgment.",
+              _network_rule(),
               f"- Test cases in skill-creator's format are ready in `{(root / 'evals').as_posix()}/` "
               f"({len(cases)} case(s), one per session): copy them into the skill's evals/ and run them.",
               ("- Run skill-creator's test runs and its description optimization loop with `LEARNING_HARNESS_DISABLE=1` "

@@ -28,7 +28,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from harness_lib import store  # noqa: E402
-from harness_lib.scan import blocking, scan_files  # noqa: E402
+from harness_lib.scan import blocking, scan_artifact  # noqa: E402
 from registry import install as reg  # noqa: E402
 from validate import replay  # noqa: E402
 
@@ -164,8 +164,7 @@ def cmd_review(args):
 
     # re-scan what is on disk now: the same files validation scans (a skill's evals/ are test fixtures the harness
     # wrote, never run as part of the skill)
-    scanned = {k: v for k, v in files.items() if not (proposal["type"] == "skill" and k.startswith("evals/"))}
-    flags = scan_files(scanned)
+    flags = scan_artifact(proposal["type"], files)
     print("\n== safety scan")
     bl = blocking(flags)
     print("  BLOCKING: " + ("none" if not bl else ""))
@@ -224,14 +223,14 @@ def cmd_revalidate(args):
     proposal, files, d = _draft(args.draft)
     pattern = store.load_pattern(proposal["pattern_key"])
     rep = replay.validate_draft(proposal, files, pattern, previous=store.read_json(d / "validation.json"))
-    for f in blocking(scan_files(files)):
+    for f in blocking(scan_artifact(proposal["type"], files)):
         msg = f"safety scan: {f['kind']} in {f['file']}:{f['line']} ({f['detail']})"
         if msg not in rep["problems"]:
             rep["problems"].append(msg)
     rep["passed"] = not rep["problems"]
     store.write_json_atomic(d / "validation.json", rep)
     proposal["status"] = "validated" if rep["passed"] else "failed_validation"
-    proposal["scan_flags"] = scan_files(files)
+    proposal["scan_flags"] = scan_artifact(proposal["type"], files)
     store.write_json_atomic(d / "proposal.json", proposal)
     replay.print_report(rep)
     return 0 if rep["passed"] else 1
@@ -249,8 +248,7 @@ def cmd_approve(args):
 
     print("re-validating the draft as it is on disk now ...")
     rep = replay.validate_draft(proposal, files, pattern, previous=store.read_json(d / "validation.json"))
-    bl = blocking(scan_files({k: v for k, v in files.items()   # the files validation scans: not a skill's evals/
-                              if not (proposal["type"] == "skill" and k.startswith("evals/"))}))
+    bl = blocking(scan_artifact(proposal["type"], files))   # the same gate as validation
     for f in bl:
         msg = f"safety scan: {f['kind']} in {f['file']}:{f['line']} ({f['detail']})"
         if msg not in rep["problems"]:
@@ -366,7 +364,7 @@ def cmd_adopt(args):
                 "created_by": "skill-creator", "description": str((fm or {}).get("description", ""))[:1024],
                 "spec": f"built with skill-creator from learned/briefs/{name}/BRIEF.md", "entrypoint": "",
                 "type_deviation_reason": "", "file_list": sorted(files), "tests": [],
-                "scan_flags": scan_files({k: v for k, v in files.items() if not k.startswith("evals/")}),
+                "scan_flags": scan_artifact("skill", files),
                 "evidence": {"sessions": meta["sessions"], "n_success": len(meta["sessions"]),
                              "n_sessions": pattern.get("n_sessions")},
                 "quick": meta.get("quick", False), "created_at": store.now()}
@@ -395,6 +393,37 @@ def cmd_adopt(args):
         return 0
     print("\nnot adopted yet: fix the problems above (with skill-creator), then run adopt again", file=sys.stderr)
     return 1
+
+
+def cmd_allowed_hosts(args):
+    """Show or change the hosts a generated skill's curl/wget/ssh may reach besides localhost."""
+    from harness_lib import scan
+    hosts = set(scan.allowed_hosts())
+    changed = False
+    for h in args.add or []:
+        try:
+            hosts.add(scan.check_host_entry(h))
+        except ValueError as e:
+            raise LookupError(str(e)) from None   # nothing saved
+        changed = True
+    for h in args.remove or []:
+        e = h.strip().lower()
+        if e not in hosts:
+            raise LookupError(f"{h!r} isn't on the list")
+        hosts.discard(e)
+        changed = True
+    if changed:
+        scan.set_allowed_hosts(sorted(hosts))
+    current = scan.allowed_hosts()
+    print("hosts a generated skill's curl, wget, ssh, scp and rsync may reach, besides localhost"
+          + (" (saved)" if changed else "") + ":")
+    for h in current:
+        print(f"  {h}")
+    if not current:
+        print("  (none: only localhost)")
+    print("Anything else, a target in a variable, nc/ncat, and piping a download into a shell still block. "
+          "Drafts already checked are re-checked by `revalidate` or `approve`.")
+    return 0
 
 
 def cmd_reject(args):
@@ -430,6 +459,10 @@ def main(argv=None):
     p = sub.add_parser("adopt", help="turn a skill built with skill-creator from a brief into a draft")
     p.add_argument("brief"); p.add_argument("--from", dest="source", help="skill folder, if not the brief's target")
     p.set_defaults(fn=cmd_adopt)
+    p = sub.add_parser("allowed-hosts", help="hosts a generated skill's curl/wget/ssh may reach besides localhost")
+    p.add_argument("--add", nargs="+", metavar="HOST", help="api.example.com, *.example.com or an IP")
+    p.add_argument("--remove", nargs="+", metavar="HOST")
+    p.set_defaults(fn=cmd_allowed_hosts)
     p = sub.add_parser("reject"); p.add_argument("draft"); p.add_argument("--reason", required=True)
     p.add_argument("--no-git", action="store_true"); p.set_defaults(fn=cmd_reject)
     args = ap.parse_args(argv)

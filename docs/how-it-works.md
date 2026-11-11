@@ -112,8 +112,28 @@ If validation passes, the pattern's status becomes `proposed` and it waits for P
 | Structure | Relative paths only (no `..`, absolute or `~`), allowed extensions `.py .md .json .txt`, at most 6 files. A script or tool needs a `.py` entrypoint, and a tool needs a valid JSON Schema. A pattern under 50% deterministic can't become a script or tool. |
 | Provenance | A `logged` test's input files and expected outputs must appear in that session's redacted transcript (whitespace and `cat -n` prefixes ignored, JSON compared structurally). A `derived_from_feedback` test needs logged inputs and a rating note on that session. `synthetic` tests are allowed but don't count toward coverage. |
 | Coverage | Logged or derived tests must cover at least `min(3, successful sessions)` successful sessions. |
-| Safety scan (`harness_lib/scan.py`) | AST/regex flags for network, subprocess/eval, environment or credential access, deletion, and absolute or parent paths. Any of these fails validation and is shown to the reviewer. Informational only, shown but not blocking: `write_any`; `network_local` (curl, wget or URLs that only reach `localhost`, `127.0.0.1` or `::1`, e.g. a health check); `claude_path` (a mention of a `.claude` folder, such as where a skill is installed). Claude's credentials and settings files (`.claude.json`, `.claude/.credentials.json`, `.claude/settings*.json`) are still `secrets`. A script's `#!/usr/bin/env <interpreter>` first line isn't counted as reading the environment. A skill's `evals/` (test fixtures the harness writes) aren't scanned, in `adopt`, `review` and `approve` alike. |
+| Safety scan (`harness_lib/scan.py`) | AST/regex flags for network, subprocess/eval, environment or credential access, deletion, and absolute or parent paths. Any of these fails validation and is shown to the reviewer. Informational only, shown but not blocking: `write_any`; `network_local` (curl, wget, ssh or URLs that only reach `localhost`, `127.0.0.1` or `::1`, e.g. a health check); `network_allowed` (skills only: see *Network in skills* below); `claude_path` (a mention of a `.claude` folder, such as where a skill is installed). Claude's credentials and settings files (`.claude.json`, `.claude/.credentials.json`, `.claude/settings*.json`) are still `secrets`. A script's `#!/usr/bin/env <interpreter>` first line isn't counted as reading the environment. A skill's `evals/` (test fixtures the harness writes) aren't scanned, in `adopt`, `review` and `approve` alike. |
 | Sandbox (`validate/replay.py`) | Each test runs in a fresh temp dir under `unshare -rn` (no network), with `python3 -I`, an environment of only `PATH`/`LANG`/`HOME`, CPU 10s, 512MB memory, 10MB max file size and a 20s timeout. If network isolation is unavailable, it refuses to run unless `--allow-no-netns` is passed. |
+
+**Network in skills.** A generated skill's `curl`, `wget`, `ssh`, `scp` and `rsync` (and URLs in its files) may reach localhost and the hosts you allow, and nothing else:
+
+```bash
+python3 review/cli.py allowed-hosts                                    # show the list
+python3 review/cli.py allowed-hosts --add artifacts.mycorp.com *.internal.example
+python3 review/cli.py allowed-hosts --remove artifacts.mycorp.com
+```
+
+- **Entries:** exact host names, IPs, or `*.example.com` for subdomains (not `example.com` itself). Schemes, ports and paths are rejected. The list is stored under `"scan": {"allowed_hosts": [...]}` in `store/config.json`.
+- **Allowed** uses are shown to the reviewer as `network_allowed` but don't block.
+- **Still blocking:**
+  - any other host;
+  - a target the scan can't read: a URL in a variable (`curl "$URL"`), `curl` without `http(s)://` (except bare `localhost`), or an ssh, scp or rsync target in a variable;
+  - `nc` and `ncat`;
+  - HTTP libraries imported in Python code;
+  - piping a download into a shell (`curl … | sh`), as `exec`, even from an allowed host.
+- **Briefs** tell skill-creator these rules and your list.
+- **Changing the list:** `revalidate` and `approve` re-check a draft against the current list.
+- **Scripts and tools** keep localhost only: their tests run without a network.
 
 **Skills are built with skill-creator, never drafted by the harness** (see [Skill briefs](#skill-briefs-refinebriefpy)). `propose.py` refuses skill patterns and skill-type output. When you `adopt` a skill that skill-creator built, it's validated like this, because a skill is instructions rather than code:
 1. **The Claude skill standard.** The rules of `skill-creator`'s `scripts/quick_validate.py`:

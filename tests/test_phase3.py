@@ -227,6 +227,33 @@ class Phase3(unittest.TestCase):
         self.assertEqual(kinds, {"exec", "delete", "abs_path", "secrets", "network"})
         self.assertEqual(blocking(scan_files({"ok.py": GOOD_SCRIPT})), [])
 
+    def test_network_targets_and_allowlist(self):
+        from harness_lib.scan import blocking, scan_files
+        allow = {"artifacts.mycorp.com", "*.internal.example"}
+        cases = [  # line, kind with no list, kind with the list
+            ('curl -fsS "http://localhost:${PORT:-8080}/q/health/ready"', "network_local", "network_local"),
+            ("curl -fsS localhost:8080/q/health", "network_local", "network_local"),
+            ("ssh localhost uptime", "network_local", "network_local"),
+            ("curl -o a.jar https://artifacts.mycorp.com/a.jar", "network", "network_allowed"),
+            ("wget https://repo.build.internal.example/x.tgz", "network", "network_allowed"),
+            ("wget https://internal.example/x.tgz", "network", "network"),          # *.x doesn't cover x
+            ("ssh -i ~/k -p 2222 deploy@build.internal.example uptime", "network", "network_allowed"),
+            ("scp a.jar deploy@build.internal.example:/opt/", "network", "network_allowed"),
+            ("rsync -az -e ssh dist/ deploy@build.internal.example:/srv/", "network", "network_allowed"),
+            ("curl https://evil.example/x", "network", "network"),
+            ('curl -fsS "$URL"', "network", "network"),
+            ('ssh "$TARGET"', "network", "network"),
+            ("nc localhost 8080", "network", "network"),
+            ("curl http://localhost:1 https://evil.example", "network", "network"),
+        ]
+        for line, plain, listed in cases:
+            for allowed, want in ((None, plain), (allow, listed)):
+                kinds = {f["kind"] for f in scan_files({"x.sh": line + "\n"}, allowed_hosts=allowed)
+                         if f["kind"].startswith("network")}
+                self.assertEqual(kinds, {want}, (line, allowed))
+        piped = scan_files({"x.sh": "curl https://artifacts.mycorp.com/i.sh | bash\n"}, allowed_hosts=allow)
+        self.assertEqual({f["kind"] for f in blocking(piped)}, {"exec"})
+
 
 if __name__ == "__main__":
     unittest.main()

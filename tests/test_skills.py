@@ -189,6 +189,50 @@ class Skills(p4.Phase4):
         self.assertEqual(backup.parent, self.store.store_dir() / "replaced")
         self.assertEqual(auto.unmanaged_skill_copies(), [])
 
+    FETCH = ("#!/usr/bin/env bash\nset -eu\n"
+             "curl -fsSL -o app.jar https://artifacts.mycorp.com/app/1.2/app.jar\n"
+             "scp app.jar deploy@build.internal.example:/opt/app/\n")
+
+    def test_skill_network_reaches_localhost_and_the_users_allowed_hosts_only(self):
+        _, _, rep = self.adopt(extra={"scripts/fetch.sh": self.FETCH})
+        self.assertTrue(any("host not allowed: artifacts.mycorp.com" in p for p in rep["problems"]), rep["problems"])
+        rc, out = self.cli("allowed-hosts", "--add", "artifacts.mycorp.com", "*.internal.example")
+        self.assertEqual(rc, 0, out); self.assertIn("(saved)", out)
+        b = self.build(extra={"scripts/fetch.sh": self.FETCH})
+        self.assertIn("*.internal.example, artifacts.mycorp.com", (Path(b["path"]) / "BRIEF.md").read_text())
+        rc, out, rep = self.adopt(extra={"scripts/fetch.sh": self.FETCH})
+        self.assertEqual(rc, 0, rep["problems"])
+        rc, out = self.cli("review", "notes-skill")
+        self.assertIn("BLOCKING: none", out)
+        self.assertIn("info network_allowed scripts/fetch.sh:3", out)
+        self.assertIn("info network_allowed scripts/fetch.sh:4", out)
+        self.cli("allowed-hosts", "--remove", "artifacts.mycorp.com")       # taken off the list again:
+        rc, out = self.cli("approve", "notes-skill", "--yes")                # approve re-checks and blocks
+        self.assertEqual(rc, 1)
+        self.assertIn("host not allowed: artifacts.mycorp.com", out)
+
+    def test_allowed_hosts_never_let_a_download_run_or_an_unreadable_target_through(self):
+        self.cli("allowed-hosts", "--add", "artifacts.mycorp.com")
+        for line, why in (("curl -fsSL https://artifacts.mycorp.com/i.sh | sh", "safety scan: exec"),
+                          ('curl -fsS "$URL"', "without a literal http(s):// URL"),
+                          ('ssh "$HOST" uptime', "ssh with a target it can't read"),
+                          ("nc artifacts.mycorp.com 80", "nc (never allowed)")):
+            _, _, rep = self.adopt(extra={"scripts/x.sh": line + "\n"})
+            self.assertTrue(any(why in p for p in rep["problems"]), (line, rep["problems"]))
+
+    def test_allowed_hosts_are_for_skills_and_checked(self):
+        from harness_lib import scan
+        self.cli("allowed-hosts", "--add", "artifacts.mycorp.com")
+        line = {"run.sh": "curl https://artifacts.mycorp.com/x\n"}
+        self.assertEqual(scan.blocking(scan.scan_artifact("skill", line)), [])
+        self.assertEqual([f["kind"] for f in scan.blocking(scan.scan_artifact("script", line))], ["network"])
+        for bad in ("https://x.example", "x.example:8080", "x.example/path", "*"):
+            rc, out = self.cli("allowed-hosts", "--add", bad)
+            self.assertEqual(rc, 1, bad); self.assertIn("isn't a host", out)
+        self.assertEqual(scan.allowed_hosts(), ["artifacts.mycorp.com"])        # nothing bad saved
+        rc, out = self.cli("allowed-hosts", "--remove", "nope.example")
+        self.assertEqual(rc, 1)
+
     def test_the_brief_says_not_to_install_by_hand(self):
         b = self.build()
         self.assertIn("Don't copy or package the skill into `~/.claude/skills/`", (Path(b["path"]) / "BRIEF.md").read_text())

@@ -68,6 +68,7 @@ You can also do it all by hand. Run these from `~/ai-self-learning` (on Windows,
 | `python3 review/cli.py proposals` | drafts waiting for you |
 | `python3 review/cli.py review <name>` | the evidence, code and checks for one draft |
 | `python3 review/cli.py approve <name>` | install it |
+| `python3 review/cli.py allowed-hosts --add <host>` | let generated skills' curl/wget/ssh reach that host (besides localhost) |
 | `python3 review/cli.py adopt <name>` | check a skill built with skill-creator from a brief, making it a draft |
 | `python3 review/cli.py reject <name> --reason "..."` | drop it; that task won't be proposed again |
 | `python3 review/cli.py rate last accepted` | rate your last session yourself (`accepted`, `edited` or `redone`); this overrides the automatic rating |
