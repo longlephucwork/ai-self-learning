@@ -17,6 +17,15 @@ if log:
         if "--settings" in args:
             rec["settings"] = json.load(open(args[args.index("--settings") + 1], encoding="utf-8"))
         fh.write(json.dumps(rec) + "\n")
+if os.environ.get("FAKE_CLAUDE_REFUSE"):  # what real claude prints when the API refuses the call (exit 1)
+    status = os.environ.get("FAKE_CLAUDE_REFUSE_STATUS")
+    print(json.dumps({"duration_api_ms": 0, "stop_reason": "stop_sequence", "session_id": "fake",
+                      "total_cost_usd": 0, "usage": {"output_tokens_details": {"thinking_tokens": 0},
+                                                      "input_tokens": 0},
+                      "type": "result", "subtype": "success", "is_error": True,
+                      "result": os.environ["FAKE_CLAUDE_REFUSE"],
+                      **({"api_error_status": int(status)} if status else {})}))
+    sys.exit(1)
 if os.environ.get("FAKE_CLAUDE_FAIL"):
     print(json.dumps({"type": "result", "is_error": False, "total_cost_usd": 0.0}))  # no structured_output
     sys.exit(0)

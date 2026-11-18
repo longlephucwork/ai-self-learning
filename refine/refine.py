@@ -539,7 +539,11 @@ def main(argv=None):
         lr = st.get("last_result") or {}
         print(f"last successful run: {st.get('last_run_at', 'never')}")
         if st.get("last_error"):
-            print(f"last attempt FAILED at {st.get('last_attempt_at')}: {st['last_error'][:200]}  (details: store/auto.log)")
+            print(f"last attempt FAILED at {st.get('last_attempt_at')}: {st['last_error'][:400]}  (details: store/auto.log)")
+            if st.get("failing_since"):
+                print(f"failing since {st['failing_since']}"
+                      + ("; Claude refuses every call: check its login (/login), usage limit or credit, or set "
+                         "LEARNING_HARNESS_MODEL to a model the account can use" if st.get("last_error_fatal") else ""))
         elif lr:
             print(f"last run spent ${lr.get('spent_usd', 0):.3f}")
         for i in auto.inbox():

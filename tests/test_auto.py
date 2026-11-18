@@ -210,6 +210,56 @@ class Auto(unittest.TestCase):
         with self.assertRaises(ValueError):
             install.auto_choices(argparse.Namespace(budget=None, every="soon", after_sessions=None, learn_after=None))
 
+    REFUSED = "There's an issue with the selected model (claude-haiku-5-5). It may not exist or you may not have access to it."
+
+    def test_the_reason_a_call_was_refused_is_kept(self):
+        from harness_lib.claude_cli import ClaudeError, run_structured
+        with mock.patch.dict(os.environ, {"FAKE_CLAUDE_REFUSE": self.REFUSED, "FAKE_CLAUDE_REFUSE_STATUS": "404"}), self.assertRaises(ClaudeError) as e:
+            run_structured("x", {"type": "object", "properties": {"confidence": {"type": "number"}}}, system="s")
+        self.assertTrue(e.exception.fatal)
+        self.assertEqual(e.exception.status, 404)
+        self.assertIn("issue with the selected model", str(e.exception))      # not the JSON's opening bookkeeping
+        self.assertNotIn("duration_api_ms", str(e.exception))
+        with mock.patch.dict(os.environ, {"FAKE_CLAUDE_REFUSE": "Overloaded"}), self.assertRaises(ClaudeError) as e:
+            run_structured("x", {"type": "object", "properties": {"confidence": {"type": "number"}}}, system="s")
+        self.assertFalse(e.exception.fatal)                                     # transient: not the account
+
+    def test_a_refused_account_stops_the_run_and_is_reported(self):
+        self.add_sessions()
+        self.auto.set_config(enabled=True, min_new_sessions=1)
+        os.environ["FAKE_CLAUDE_LOG"] = str(self.t / "calls.jsonl")
+        with mock.patch.dict(os.environ, {"FAKE_CLAUDE_REFUSE": self.REFUSED, "FAKE_CLAUDE_REFUSE_STATUS": "404"}):
+            r = self.auto.run(force=True)
+        self.assertEqual(len(self.calls()), 1)                                  # stopped at the first refusal
+        self.assertTrue(r.get("fatal"))
+        st = self.auto.state()
+        self.assertIn("issue with the selected model", st["last_error"])
+        self.assertTrue(st["last_error_fatal"] and st["failing_since"])
+        note = self.auto.session_start_context()
+        self.assertIn("Background learning has been failing", note)
+        self.assertIn("issue with the selected model", note)
+        self.assertNotIn("Background learning has been failing", self.auto.session_start_context() or "")   # once
+        from refine import refine
+        out = io.StringIO()
+        with redirect_stdout(out):
+            refine.main(["auto-status"])
+        self.assertIn("failing since", out.getvalue())
+        self.assertIn("/login", out.getvalue())
+        log = (self.store.store_dir() / "auto.log").read_text()
+        self.assertIn("every model call is refused", log)
+        self.auto.run(force=True)                                               # fixed: the next run works
+        st = self.auto.state()
+        self.assertNotIn("last_error", st); self.assertNotIn("failing_since", st)
+
+    def test_a_transient_failure_does_not_stop_the_run(self):
+        self.add_sessions()
+        self.auto.set_config(enabled=True, min_new_sessions=1)
+        os.environ["FAKE_CLAUDE_LOG"] = str(self.t / "calls.jsonl")
+        with mock.patch.dict(os.environ, {"FAKE_CLAUDE_REFUSE": "Overloaded"}):
+            self.auto.run(force=True)
+        self.assertGreater(len(self.calls()), 1)                                # each session was still tried
+        self.assertFalse(self.auto.state().get("last_error_fatal"))
+
     def test_failed_run_does_not_use_up_the_daily_window(self):
         self.auto.set_config(enabled=True)
         self.add_sessions()

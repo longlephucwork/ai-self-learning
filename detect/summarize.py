@@ -175,6 +175,8 @@ def summarize_sessions(sids: list[str], *, model: str | None = None, workers: in
         try:
             out, cost = run_structured(prompt, SUMMARY_SCHEMA, system=SYSTEM, model=model)
         except ClaudeError as e:
+            if e.fatal:
+                raise   # surfaces from ex.map below: no point summarising the rest
             return sid, chash, None, 0.0, str(e)
         errs = validate(out, SUMMARY_SCHEMA)
         return sid, chash, out, cost, ("; ".join(errs) if errs else None)

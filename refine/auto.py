@@ -365,8 +365,10 @@ def infer_ratings(sids: list[str], *, min_confidence: float, model: str | None =
             res, _ = run_structured(f"<<<SESSION-{n}\n{digest}\nSESSION-{n}>>>", RATE_SCHEMA, system=RATE_SYSTEM,
                                     model=model or DEFAULT_MODEL, max_budget_usd=0.2)
         except ClaudeError as e:
+            if e.fatal:
+                raise   # the account refuses every call: stop the run instead of failing each session
             counts["failed"] += 1
-            log(f"  rate {sid[:8]}: failed ({str(e)[:120]})")
+            log(f"  rate {sid[:8]}: failed ({str(e)[:200]})")
             if "budget" in str(e):
                 break
             continue
@@ -640,7 +642,9 @@ def run(*, force: bool = False) -> dict:
                                                    log=lambda m: log(m))
                 method = "claude"
             except (ClaudeError, ValueError) as e:
-                log(f"  grouping with claude failed ({str(e)[:100]}); grouping by family")
+                if getattr(e, "fatal", False):
+                    raise
+                log(f"  grouping with claude failed ({str(e)[:200]}); grouping by family")
                 clusters, method = cl.group_by_family(summaries), "family"
             rows = cl.apply_clusters(clusters, summaries, method=method, min_success=int(cfg["min_success"]))
             # short-term memory fades: a task not repeated for long enough is forgotten
@@ -667,6 +671,8 @@ def run(*, force: bool = False) -> dict:
                 drafted.append({"pattern": p["key"], "passed": r["passed"], "draft": r["draft"]})
                 log(f"  drafted {p['key']}: {'validated' if r['passed'] else 'not validated'} -> {r['draft']}")
             except (ClaudeError, LookupError, ValueError) as e:
+                if getattr(e, "fatal", False):
+                    raise
                 drafted.append({"pattern": p["key"], "passed": False, "error": str(e)[:200]})
                 log(f"  drafting {p['key']} failed: {str(e)[:150]}")
                 if "budget" in str(e):
@@ -685,6 +691,8 @@ def run(*, force: bool = False) -> dict:
                 drafted.append({"promotes": e["name"], "passed": r["passed"], "draft": r["draft"]})
                 log(f"  promotion of {e['name']}: {'validated' if r['passed'] else 'not validated'} -> {r['draft']}")
             except (ClaudeError, LookupError, ValueError) as ex:
+                if getattr(ex, "fatal", False):
+                    raise
                 drafted.append({"promotes": e["name"], "passed": False, "error": str(ex)[:200]})
                 log(f"  promoting {e['name']} failed: {str(ex)[:150]}")
             left -= 1
@@ -696,6 +704,10 @@ def run(*, force: bool = False) -> dict:
             + (f"{len(nm)} task(s) waiting for you to confirm unclear outcomes: "
                + ", ".join(f"{n['label']} ({n['n_success']}/{n['n_sessions']} known good)" for n in nm)
                if nm else "nothing waiting on unclear outcomes"))
+    except ClaudeError as e:   # mostly fatal ones: the account or setup refuses every call
+        result["error"] = str(e)[:400]
+        result["fatal"] = e.fatal
+        log(f"auto run stopped: {'every model call is refused: ' if e.fatal else ''}{e}")
     except Exception as e:  # a background run must never leave the lock behind
         import traceback
         result["error"] = repr(e)[:300]
@@ -707,9 +719,13 @@ def run(*, force: bool = False) -> dict:
         st = {**state(), "last_attempt_at": started, "last_result": result}
         if broken:   # a failed run doesn't use up the daily window: it's retried after RETRY_AFTER_FAILURE
             st["last_error"] = result.get("error") or "every model call failed (see store/auto.log)"
+            st["last_error_fatal"] = bool(result.get("fatal"))
+            st.setdefault("failing_since", started)
         else:
             st["last_run_at"] = started
             st.pop("last_error", None)
+            st.pop("last_error_fatal", None)
+            st.pop("failing_since", None)
         store.write_json_atomic(store.store_dir() / "auto_state.json", st)
         _release()
         log(f"auto run {'FAILED' if broken else 'finished'}; spent ${result['spent_usd']:.3f}")
@@ -856,6 +872,19 @@ def stuck_context(stuck: list[dict], copies: list[dict]) -> list[str]:
     return lines
 
 
+def failing_context(st: dict) -> list[str]:
+    """Background learning stopped because the account refuses the harness's model calls."""
+    since = _ts(st.get("failing_since"))
+    py = Path(sys.executable).resolve().as_posix()
+    return ["[learning-harness] Background learning has been failing"
+            + (f" since {_local(since)}" if since else "") + " because Claude refuses its model calls: "
+            + str(st.get("last_error"))[:400] + ". Tell the user in one or two sentences, early in this "
+            "conversation. Usual fixes: run `claude` once in a terminal and `/login` if the login expired or "
+            "switched account; wait for a usage limit to reset or add credit; or, if the model isn't available "
+            "to their account, set LEARNING_HARNESS_MODEL to one it can use. Then check with: "
+            f"{py} {(store.REPO_ROOT / 'refine' / 'refine.py').as_posix()} auto --force"]
+
+
 def session_start_context() -> str | None:
     """Text for Claude at session start when a draft or skill brief is waiting; each version is announced once."""
     from refine.brief import waiting
@@ -877,6 +906,10 @@ def session_start_context() -> str | None:
     for c in copies:
         seen["copy:" + c["name"]] = week
     later = stuck_context(stuck, copies)
+    st = state()
+    if st.get("last_error_fatal") and seen.get("failing") != st.get("last_error"):
+        seen["failing"] = st["last_error"]
+        later = failing_context(st) + later
     if not fresh:
         if fresh_briefs or to_confirm or later:
             store.write_json_atomic(seen_path, seen)

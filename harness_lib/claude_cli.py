@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shlex
 import shutil
 import subprocess
@@ -23,7 +24,36 @@ DEFAULT_MODEL = os.environ.get("LEARNING_HARNESS_MODEL", "claude-haiku-5-5")
 
 
 class ClaudeError(RuntimeError):
-    pass
+    """`fatal`: the account or setup refuses every call (login, access to the model, usage or credit limit),
+    so retrying other calls in the same run is pointless. `status`: the API's HTTP status, when claude gives one."""
+
+    def __init__(self, msg: str, *, fatal: bool = False, status: int | None = None):
+        super().__init__(msg)
+        self.fatal, self.status = fatal, status
+
+
+FATAL_STATUS = {401, 402, 403, 404}
+FATAL_HINT = re.compile(r"log ?in|/login|authenticat|api key|oauth|credit|billing|usage limit|quota|"
+                        r"selected model|access to (it|this model)|not available|organization", re.IGNORECASE)
+
+
+def _failure(stdout: str, stderr: str, prefix: str) -> ClaudeError:
+    """The reason a call failed, from claude's JSON reply (its `result`, `errors` and HTTP status) rather than
+    the start of the raw output, which is only session bookkeeping."""
+    reason, status = "", None
+    try:
+        d = json.loads(stdout)
+        status = d.get("api_error_status")
+        errs = d.get("errors") or []
+        reason = str(d.get("result") or "; ".join(map(str, errs if isinstance(errs, list) else [errs])) or "")
+        if not reason and d.get("subtype") not in (None, "success"):
+            reason = str(d["subtype"])
+    except (json.JSONDecodeError, AttributeError, TypeError, ValueError):
+        pass
+    reason = reason or (stderr or stdout or "").strip()[:500] or "no output"
+    fatal = (isinstance(status, int) and status in FATAL_STATUS) or bool(FATAL_HINT.search(reason))
+    return ClaudeError(f"{prefix}: {reason[:400]}" + (f" (HTTP {status})" if status else ""), fatal=fatal,
+                       status=status if isinstance(status, int) else None)
 
 
 def month_spend(month: str | None = None) -> float:
@@ -131,7 +161,7 @@ def run_structured(prompt: str, schema: dict, *, system: str, model: str | None 
             _record_spend(float(json.loads(p.stdout).get("total_cost_usd") or 0.0), model or DEFAULT_MODEL)
         except (json.JSONDecodeError, AttributeError, TypeError, ValueError):
             pass
-        raise ClaudeError(f"claude exited {p.returncode}: {(p.stderr or p.stdout)[:500]}")
+        raise _failure(p.stdout, p.stderr, f"claude exited {p.returncode}")
     try:
         d = json.loads(p.stdout)
     except json.JSONDecodeError as e:
@@ -139,7 +169,7 @@ def run_structured(prompt: str, schema: dict, *, system: str, model: str | None 
     cost = float(d.get("total_cost_usd") or 0.0)
     _record_spend(cost, model or DEFAULT_MODEL)  # failed calls cost money too
     if d.get("is_error"):
-        raise ClaudeError(f"claude reported error: {str(d.get('result'))[:300]}")
+        raise _failure(p.stdout, p.stderr, "claude reported error")
     out = d.get("structured_output")
     if not isinstance(out, dict):
         raise ClaudeError("no structured_output in response")

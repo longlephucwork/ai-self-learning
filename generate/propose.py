@@ -306,6 +306,8 @@ def propose(key: str, *, model: str | None = None, max_attempts: int = 2, force:
             prop, cost = run_structured(build_prompt(evidence, previous, failures, revision), PROPOSAL_SCHEMA,
                                         system=SYSTEM, model=model or GEN_MODEL, max_budget_usd=2.0, timeout=600)
         except ClaudeError as e:
+            if e.fatal:
+                raise   # login, limit or model access: another attempt fails the same way
             attempts.append({"n": n, "error": str(e)[:500]})
             log(f"  claude error: {e}")
             continue
