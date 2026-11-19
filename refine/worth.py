@@ -159,6 +159,40 @@ def current(pattern: dict) -> dict | None:
     return a if a and a.get("members") == members_key(pattern) else None
 
 
+SETTLE_AFTER = 2   # "not a skill" this many times in a row: settled, until something significant changes
+
+
+def _significant(sig: dict, before: dict) -> str | None:
+    """What changed enough since `before` (the signals at the last decision) to decide again, if anything."""
+    if sig["repeats"] >= 2 * max(before.get("repeats", 0), 1):
+        return f"repeats doubled ({before.get('repeats')} -> {sig['repeats']})"
+    if sig["corrections"] > before.get("corrections", 0):
+        return "the user corrected it again"
+    return None
+
+
 def decide(pattern: dict, **kw) -> dict:
-    """The current assessment, assessing first when there's none or the sessions changed."""
-    return current(pattern) or assess(pattern, **kw)
+    """The current assessment, assessing first when there's none or the sessions changed. A task found not to be
+    a skill SETTLE_AFTER times in a row is settled: new sessions alone don't send it to the model again, only
+    twice as many repeats or a new correction do."""
+    a = current(pattern)
+    if a:
+        return a
+    before = pattern.get("assessment")
+    if before and not before["worthy"] and before.get("streak", 1) >= SETTLE_AFTER:
+        sig = signals(pattern)
+        if not _significant(sig, before.get("settled_signals") or before.get("signals") or {}):
+            a = {**before, "members": members_key(pattern), "signals": sig, "settled": True,
+                 "settled_signals": before.get("settled_signals") or before.get("signals")}
+            p = store.load_pattern(pattern["key"]) or pattern
+            p["assessment"] = a
+            store.save_pattern(p)
+            return a
+    a = assess(pattern, **kw)
+    streak = before.get("streak", 1) + 1 if before and not before["worthy"] and not a["worthy"] else 1
+    if streak > 1:
+        p = store.load_pattern(pattern["key"]) or pattern
+        p["assessment"] = {**a, "streak": streak}
+        store.save_pattern(p)
+        a = p["assessment"]
+    return a

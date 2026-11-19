@@ -344,6 +344,11 @@ The decision comes with its evidence: repeats, distinct days, steps per session,
 - "Learn this" never waits for a decision.
 - Mechanical tasks aren't assessed: they become scripts or tools as before.
 
+**Cleanup:**
+- **"Not a skill" twice in a row is settled.** New sessions alone don't send the task to the model again. Only twice as many repeats, or a new correction from you, do.
+- **Unbuilt briefs expire.** A skill brief nobody started building within `brief_expire_days` (42) stops being offered. For a new skill, the task becomes `rejected` with that reason, and it's offered again if its successful repeats double. An update brief just goes, and the installed skill stays. A skill you built that failed `adopt` keeps its weekly reminder.
+- **Rejected and retired tasks keep only their record.** Their pattern file, with the reason and the counts, stays so they aren't proposed again. Their sessions, and those of rejected or expired briefs, are no longer protected, so they're pruned like old one-offs after `keep_days`.
+
 ### Long sessions are split into their jobs automatically
 
 One session often does several separate jobs: update a repo, merge a PR, then release. Each summary lists the session's jobs, with the range of requests each one spans. Once the session has finished, if it did two or more jobs, the background run turns each job into an **automatic part**, a segment like the ones below, marked `"auto": true`.

@@ -519,7 +519,9 @@ def main(argv=None):
                            else f"mechanical: drafted as a {kind}")
             elif a:
                 verdict = (f"SKILL CANDIDATE ({a['kind']}): {a['reason']}" if a["worthy"]
-                           else f"NOT A SKILL ({a['kind']}): {a['reason']}")
+                           else f"NOT A SKILL ({a['kind']}): {a['reason']}"
+                           + ("  [settled: decided again only if its repeats double or you correct it]"
+                              if a.get("settled") else ""))
             elif st == "forming":
                 verdict = f"not decided yet: needs {need} successful repeats first"
             else:
@@ -606,6 +608,9 @@ def main(argv=None):
                          "LEARNING_HARNESS_MODEL to a model the account can use" if st.get("last_error_fatal") else ""))
         elif lr:
             print(f"last run spent ${lr.get('spent_usd', 0):.3f}")
+        if lr.get("expired_briefs"):
+            print(f"stopped offering skill brief(s) nobody built in {cfg.get('brief_expire_days', 42)} days: "
+                  + ", ".join(lr["expired_briefs"]) + " (offered again if their successful repeats double)")
         for i in auto.inbox():
             print(f"waiting for you: {i['type']} {i['draft']}  ->  python3 review/cli.py review {i['draft']}")
         for x in auto.stuck_skills():

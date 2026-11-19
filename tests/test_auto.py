@@ -449,6 +449,83 @@ class Auto(unittest.TestCase):
         self.assertRegex(out.getvalue(), r"diagnose .*\n    NOT A SKILL \(investigation\): different every time")
         self.assertIn("refine/refine.py brief <task>", out.getvalue())
 
+    # ---------------- cleanup ----------------
+
+    def grow(self, key, n, *, note=None):
+        """n more sessions of task `key` (on different days), added to it."""
+        p = self.store.load_pattern(key)
+        start = len(p["session_ids"])
+        extra = self.task(f"{key}-x{start}", days=tuple(10 + start + i for i in range(n)), note=note)
+        p["session_ids"] += extra["session_ids"]
+        self.store.delete_pattern(extra["key"])
+        self.store.save_pattern(p)
+        return self.store.load_pattern(key)
+
+    def test_not_a_skill_twice_in_a_row_is_settled(self):
+        from refine import worth
+        os.environ["FAKE_CLAUDE_LOG"] = str(self.t / "calls.jsonl")
+        rules = {"Diagnose": [False, "investigation", "different every time"]}
+        with mock.patch.dict(os.environ, {"FAKE_WORTH_RULES": json.dumps(rules)}):
+            worth.decide(self.task("diagnose", intent="Diagnose why a job failed"))
+            a = worth.decide(self.grow("diagnose", 1))
+            self.assertEqual(a["streak"], 2)
+            a = worth.decide(self.grow("diagnose", 1))                           # one more session: settled
+            self.assertTrue(a["settled"]); self.assertFalse(a["worthy"])
+            self.assertEqual(len(self.calls()), 2)                                # no model call for it
+            a = worth.decide(self.grow("diagnose", 1, note="do it the other way"))   # a new correction
+            self.assertEqual(len(self.calls()), 3)
+            self.assertEqual(a["streak"], 3)
+            worth.decide(self.grow("diagnose", 1))                                # settled again
+            self.assertEqual(len(self.calls()), 3)
+            worth.decide(self.grow("diagnose", 9))                                # repeats doubled
+            self.assertEqual(len(self.calls()), 4)
+
+    def test_an_unbuilt_brief_expires_and_its_task_is_set_aside(self):
+        from refine.brief import waiting, write_brief
+        self.task("release")
+        b = write_brief("release")
+        self.assertEqual(self.auto.expire_briefs(42), [])                         # fresh: still offered
+        later = datetime.now(timezone.utc) + timedelta(days=43)
+        self.assertEqual(self.auto.expire_briefs(42, now=later), ["release"])
+        self.assertEqual(waiting(), [])
+        self.assertEqual(json.loads((Path(b["path"]) / "brief.json").read_text())["status"], "expired")
+        p = self.store.load_pattern("release")
+        self.assertEqual(p["status"], "rejected")
+        self.assertIn("not built within 42 days", p["rejected"]["reason"])
+        self.assertEqual(p["rejected"]["n_success_at_rejection"], 3)              # offered again if this doubles
+
+    def test_an_expired_update_brief_leaves_the_skill_alone(self):
+        from refine.brief import write_brief
+        p = self.task("release")
+        p["status"] = "installed"
+        self.store.save_pattern(p)
+        write_brief("release", improve={"name": "release", "version": 1, "path": "skills/release", "failures": []})
+        later = datetime.now(timezone.utc) + timedelta(days=43)
+        self.assertEqual(self.auto.expire_briefs(42, now=later), ["release"])
+        self.assertEqual(self.store.load_pattern("release")["status"], "installed")
+
+    def test_a_rejected_task_keeps_its_record_but_not_its_sessions(self):
+        from refine.brief import write_brief
+        kept = self.task("release")
+        dropped = self.task("chores", intent="Tidy the workspace")
+        p = self.store.load_pattern("chores")
+        p.update(status="rejected", rejected={"at": self.store.now(), "reason": "not wanted", "n_success_at_rejection": 3})
+        self.store.save_pattern(p)
+        keep = self.auto.protected_sessions()
+        self.assertTrue(set(kept["session_ids"]) <= keep)
+        self.assertFalse(set(dropped["session_ids"]) & keep)                      # pruned like old one-offs
+        later = datetime.now(timezone.utc) + timedelta(days=200)
+        self.assertTrue(set(dropped["session_ids"]) <= set(self.auto.prune_sessions(90, dry_run=True, now=later)))
+        self.assertEqual(self.store.load_pattern("chores")["rejected"]["reason"], "not wanted")   # the record stays
+        b = write_brief("release")                                                # a waiting brief still protects
+        self.assertTrue(set(kept["session_ids"]) <= self.auto.protected_sessions())
+        meta = json.loads((Path(b["path"]) / "brief.json").read_text())
+        (Path(b["path"]) / "brief.json").write_text(json.dumps({**meta, "status": "expired"}))
+        p = self.store.load_pattern("release")
+        p["status"] = "rejected"
+        self.store.save_pattern(p)
+        self.assertFalse(set(kept["session_ids"]) & self.auto.protected_sessions())
+
     def test_confirm_says_when_a_learnable_task_is_not_a_skill(self):
         self.near_miss_setup()                                                     # tiny sessions: trivial
         self.auto.confirm("deploy-service", accepted=["s-price"])

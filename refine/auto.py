@@ -21,6 +21,7 @@ Settings, in store/config.json under "auto" (defaults shown). Change them with `
   promote_as: "tool"   (what a promoted skill becomes: "tool" or "script")
   memory_days: 30   (how long an unpractised task takes to half fade from short-term memory; refine/synapse.py)
   split_tasks: true (split finished sessions that did several separate jobs into one part per job; refine/segment.py)
+  brief_expire_days: 42 (a skill brief nobody started building in this long stops being offered)
 Every model call's cost goes to store/spend.jsonl. Background runs stop when the month's spend reaches
 the budget, and each call's own limit is capped at what remains.
 """
@@ -44,7 +45,7 @@ DEFAULTS = {"enabled": False, "monthly_budget_usd": 5.0, "min_hours_between_runs
             "keep_days": 90,
             "max_drafts_per_run": 1, "retry_days": 7, "min_confidence": 0.6, "min_success": 3,
             "promote_min_uses": 5, "promote_min_accuracy": 0.9, "promote_min_mechanical": 0.75,
-            "promote_as": "tool", "memory_days": 30, "split_tasks": True}
+            "promote_as": "tool", "memory_days": 30, "split_tasks": True, "brief_expire_days": 42}
 LOCK_STALE_S = 2 * 3600
 RETRY_AFTER_FAILURE = timedelta(hours=1)
 CHECK_EVERY = timedelta(minutes=10)   # the Stop hook (after every reply) checks at most this often
@@ -413,17 +414,52 @@ def candidates_to_draft(retry_days: int) -> list[dict]:
 # ---------------- forgetting one-offs ----------------
 
 def protected_sessions() -> set[str]:
-    """Sessions that are evidence for something: pattern members, briefs, installed items."""
+    """Sessions that are evidence for something: members of tasks still in play, briefs in use, installed items.
+    A rejected or retired task keeps only its record (reason and counts, so it isn't proposed again): its sessions
+    are pruned like any old one-off. So are those of a brief that was rejected or expired."""
     keep = set()
     for p in store.iter_patterns():
-        keep |= set(p.get("session_ids", []))
+        if p.get("status") not in ("rejected", "retired"):
+            keep |= set(p.get("session_ids", []))
     from refine.brief import briefs_dir
     for b in briefs_dir(create=False).glob("*/brief.json"):
-        keep |= set((store.read_json(b) or {}).get("sessions", []))
+        meta = store.read_json(b) or {}
+        if meta.get("status") in ("waiting", "adopted"):
+            keep |= set(meta.get("sessions", []))
     from registry import install as reg
     for e in reg.load_registry()["installed"].values():
         keep |= set((e.get("evidence") or {}).get("sessions", []))
     return keep
+
+
+def expire_briefs(days: int, *, now: datetime | None = None, log=lambda *_: None) -> list[str]:
+    """Retire skill briefs nobody started building within `days`. A new-skill brief's task becomes `rejected`
+    (reason recorded), so it's offered again only if its successful repeats double (refine.py report); an update
+    brief just goes and the installed skill stays. A skill that was built but failed `adopt` isn't touched: the
+    user started it, and it's reminded as stuck."""
+    from refine.brief import briefs_dir, waiting
+    now = now or datetime.now(timezone.utc)
+    stuck = {x["name"] for x in stuck_skills()}
+    gone = []
+    for b in waiting():
+        made = _ts(b.get("created_at"))
+        if b["name"] in stuck or not made or now - made < timedelta(days=days):
+            continue
+        reason = f"skill brief not built within {days} days"
+        meta = store.read_json(briefs_dir() / b["name"] / "brief.json") or {}
+        store.write_json_atomic(briefs_dir() / b["name"] / "brief.json",
+                                {**meta, "status": "expired", "decision": {"decision": "expired", "at": store.now(),
+                                                                           "note": reason}})
+        if not b.get("improve"):
+            p = store.load_pattern(b["pattern_key"])
+            if p and p.get("status") == "briefed":
+                p["status"] = "rejected"
+                p["rejected"] = {"at": store.now(), "reason": reason, "brief": b["name"],
+                                 "n_success_at_rejection": p.get("n_success")}
+                store.save_pattern(p)
+        gone.append(b["name"])
+        log(f"  stopped offering the skill brief {b['name']}: {reason}")
+    return gone
 
 
 def prune_sessions(keep_days: int, *, dry_run: bool = False, now: datetime | None = None) -> list[str]:
@@ -641,6 +677,7 @@ def run(*, force: bool = False) -> dict:
     result = {"ran": True, "started_at": started}
     try:
         log(f"auto run started ({why if ok else 'forced'}); budget left ${budget_remaining():.2f}")
+        result["expired_briefs"] = expire_briefs(int(cfg.get("brief_expire_days", 42)), log=lambda m: log(m))
         pruned = prune_sessions(int(cfg["keep_days"]))
         if pruned:
             log(f"  forgot {len(pruned)} one-off session(s) older than {cfg['keep_days']} days")
