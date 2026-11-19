@@ -301,6 +301,8 @@ def main(argv=None):
     p = sub.add_parser("fix-triggers"); p.add_argument("name", help="an installed skill")
     p = sub.add_parser("auto"); p.add_argument("--force", action="store_true", help="ignore the throttle")
     sub.add_parser("auto-status")
+    sub.add_parser("candidates", help="every repeated task: is it a skill candidate, and why or why not")
+    p = sub.add_parser("assess", help="decide again whether a task is worth a skill"); p.add_argument("pattern")
     sub.add_parser("memory", help="every task's memory path: stage, strength, stability, fading")
     p = sub.add_parser("auto-config", help="show or change automatic learning's settings")
     p.add_argument("--budget", metavar="USD", help="monthly budget for background learning (default 5)")
@@ -426,6 +428,9 @@ def main(argv=None):
             sys.exit(f"error: {e}")
         if r["status"] == "forming":
             print(f"recorded; {r['n_success']} of {r['needed']} successful sessions so far")
+        elif r["status"] == "not_a_skill":
+            print(f"recorded. It's learnable, but not worth a skill ({r['kind']}): {r['reason']}\n"
+                  f"to make one anyway: python3 refine/refine.py brief {a.pattern}")
         elif r.get("brief"):
             print(f"SKILL BRIEF: {r['brief_path']}/BRIEF.md\nbuild it with skill-creator, then run: "
                   f"python3 review/cli.py adopt {r['brief']}")
@@ -493,6 +498,52 @@ def main(argv=None):
         r = auto.run(force=a.force)
         if not r["ran"]:
             print(f"not run: {r['reason']}")
+        return 0
+    elif a.cmd == "candidates":
+        from refine import auto, worth
+        rows = sorted(store.iter_patterns(), key=lambda p: (-p.get("n_success", 0), p["key"]))
+        if not rows:
+            print("no repeated tasks yet")
+            return 0
+        need = int(auto.config()["min_success"])
+        for p in rows:
+            st, kind = p.get("status"), p.get("suggested_type")
+            line = f"{p['key']}  [{st}, {p.get('n_success', 0)}/{p.get('n_sessions', 0)} successful, {kind}]"
+            a = worth.current(p) or (p.get("assessment") if st not in ("forming", "candidate") else None)
+            if st in ("briefed", "proposed", "installed"):
+                verdict = "SKILL CANDIDATE: being learned" if kind == "skill" else f"being learned as a {kind}"
+            elif st in ("rejected", "retired"):
+                verdict = f"{st}"
+            elif kind != "skill":
+                verdict = (f"mechanical: drafted as a {kind} once it has {need} successful repeats" if st == "forming"
+                           else f"mechanical: drafted as a {kind}")
+            elif a:
+                verdict = (f"SKILL CANDIDATE ({a['kind']}): {a['reason']}" if a["worthy"]
+                           else f"NOT A SKILL ({a['kind']}): {a['reason']}")
+            elif st == "forming":
+                verdict = f"not decided yet: needs {need} successful repeats first"
+            else:
+                verdict = "not decided yet: the next background run assesses it (or: refine.py assess " + p["key"] + ")"
+            print(line)
+            print(f"    {verdict}")
+            if a and a.get("signals"):
+                sg = a["signals"]
+                print(f"    {sg['repeats']} repeats on {sg['days']} day(s), {sg['avg_steps']:g} steps each, "
+                      f"steps alike {sg['alike'] if sg['alike'] is not None else '?'}, "
+                      f"{sg['corrections']} correction(s)")
+        print("\nOverride a 'not a skill' decision: python3 refine/refine.py brief <task>")
+        return 0
+    elif a.cmd == "assess":
+        from harness_lib.claude_cli import ClaudeError
+        from refine import worth
+        p = store.load_pattern(a.pattern)
+        if not p:
+            sys.exit(f"error: no task {a.pattern!r} (see refine.py candidates)")
+        try:
+            r = worth.assess(p)
+        except ClaudeError as e:
+            sys.exit(f"error: {e}")
+        print(f"{a.pattern}: {'worth a skill' if r['worthy'] else 'not a skill'} ({r['kind']}, by {r['by']}): {r['reason']}")
         return 0
     elif a.cmd == "memory":
         from refine import synapse

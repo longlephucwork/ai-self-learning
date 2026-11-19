@@ -491,6 +491,11 @@ def confirm(pattern_key: str, accepted: list[str] = (), redone: list[str] = (), 
     pattern["status"] = "candidate"
     store.save_pattern(pattern)
     if pattern.get("suggested_type") == "skill":
+        from refine import worth
+        a = worth.decide(pattern, log=log)
+        if not a["worthy"]:   # repeated, but not something a skill would help with
+            result.update(status="not_a_skill", kind=a["kind"], reason=a["reason"])
+            return result
         from refine.brief import write_brief
         b = write_brief(pattern_key)
         result.update(status="briefed", brief=b["brief"], brief_path=b["path"])
@@ -677,7 +682,17 @@ def run(*, force: bool = False) -> dict:
         from refine.brief import write_brief
         drafted, briefs = [], []
         cands = candidates_to_draft(cfg["retry_days"])
-        for p in [p for p in cands if p.get("suggested_type") == "skill"]:   # skills: a brief, no model call
+        from refine import worth
+        for p in [p for p in cands if p.get("suggested_type") == "skill"]:   # skills: a brief, if worth one
+            try:
+                a = worth.decide(p, log=lambda m: log(m))   # reused until the task's sessions change
+            except ClaudeError as e:
+                if e.fatal:
+                    raise
+                log(f"  assessing {p['key']} failed: {str(e)[:150]}")
+                continue
+            if not a["worthy"]:
+                continue   # repeated, but not a skill: `refine.py candidates` shows why
             try:
                 b = write_brief(p["key"])
                 briefs.append(b["brief"])

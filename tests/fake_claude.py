@@ -30,7 +30,12 @@ if os.environ.get("FAKE_CLAUDE_FAIL"):
     print(json.dumps({"type": "result", "is_error": False, "total_cost_usd": 0.0}))  # no structured_output
     sys.exit(0)
 
-if "confidence" in schema["properties"]:  # refine/auto.py inferred ratings
+if "skill_worthy" in schema["properties"]:  # refine/worth.py: is the task worth a skill?
+    out = {"skill_worthy": True, "kind": "procedure", "confidence": 0.8, "reason": "fake: a recurring procedure"}
+    for needle, (worthy, kind, reason) in json.loads(os.environ.get("FAKE_WORTH_RULES", "{}")).items():
+        if needle.lower() in prompt.lower():
+            out.update(skill_worthy=worthy, kind=kind, reason=reason)
+elif "confidence" in schema["properties"]:  # refine/auto.py inferred ratings
     out = {"outcome": "accepted", "confidence": float(os.environ.get("FAKE_RATE_CONF", "0.7")), "note": "",
            "reason": "fake rater"}
     for needle, (o, conf, note) in json.loads(os.environ.get("FAKE_RATE_RULES", "{}")).items():

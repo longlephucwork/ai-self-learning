@@ -66,7 +66,8 @@ def strengthen(events: list[datetime], *, stability: float, now: datetime) -> di
 
 def _session_time(sid: str):
     rec = store.load_session(sid) or {}
-    return _ts(rec.get("ended_at") or rec.get("last_activity_at") or rec.get("started_at"))
+    # when the work happened: a part's ended_at is when it was cut out of its session, not when it was done
+    return _ts(rec.get("last_activity_at") or rec.get("ended_at") or rec.get("started_at"))
 
 
 def path(pattern: dict, *, now: datetime | None = None) -> dict:

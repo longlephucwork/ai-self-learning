@@ -369,11 +369,99 @@ class Auto(unittest.TestCase):
         from refine.brief import waiting
         self.assertEqual([b["name"] for b in waiting()], [])
 
+    # ---------------- is a repeated task worth a skill? ----------------
+
+    def task(self, key, *, days=(1, 3, 6), steps=8, intent="Release a service", note=None):
+        """A candidate skill task: one session per entry in `days` (days ago), each with `steps` tool steps."""
+        sids = []
+        for n, ago in enumerate(days):
+            sid = f"{key}-{n}"
+            t = (datetime.now(timezone.utc) - timedelta(days=ago)).isoformat()
+            d = self.store.session_dir(sid, create=True)
+            self.store.write_json_atomic(d / "session.json", {
+                "session_id": sid, "requests": [{"text": f"{intent} {n}"}], "steps": [], "files_touched": [],
+                "n_tool_calls": steps, "n_requests": 1, "started_at": t, "last_activity_at": t, "ended_at": t,
+                "first_request": f"{intent} {n}", "content_hash": sid})
+            self.store.rate(sid, "edited" if note else "accepted", note)
+            self.store.save_summary(sid, {"session_id": sid, "task_family": key, "created_at": t,
+                                          "summary": {"intent": intent, "steps": ["bump version", "tag", "publish"],
+                                                      "inputs": [], "outputs": []}, "source_content_hash": sid})
+            sids.append(sid)
+        self.store.save_pattern({"key": key, "label": key, "description": intent, "status": "candidate",
+                                 "n_sessions": len(sids), "n_success": len(sids), "min_success": 3,
+                                 "success_outcomes": ["accepted", "edited"], "suggested_type": "skill",
+                                 "session_ids": sids, "excluded_injection": []})
+        return self.store.load_pattern(key)
+
+    def test_rules_say_not_a_skill_without_a_model_call(self):
+        from refine import worth
+        os.environ["FAKE_CLAUDE_LOG"] = str(self.t / "calls.jsonl")
+        a = worth.decide(self.task("retried", days=(0, 0)))
+        self.assertEqual((a["worthy"], a["kind"], a["by"]), (False, "same_day", "rules"))
+        a = worth.decide(self.task("tiny", steps=1))
+        self.assertEqual((a["worthy"], a["kind"]), (False, "trivial"))
+        self.assertEqual(self.calls(), [])
+        a = worth.decide(self.task("busy-day", days=(0, 0, 0, 0)))                # 4 in one day: a real procedure
+        self.assertEqual((a["worthy"], a["by"]), (True, "model"))
+
+    def test_the_model_tells_a_procedure_from_an_investigation(self):
+        from refine import worth
+        a = worth.decide(self.task("release", note="always tag with v prefix"))
+        self.assertEqual((a["worthy"], a["kind"]), (True, "procedure"))
+        self.assertEqual(a["signals"]["corrections"], 3)
+        self.assertEqual(a["signals"]["days"], 3)
+        rules = {"Diagnose": [False, "investigation", "different every time"]}
+        with mock.patch.dict(os.environ, {"FAKE_WORTH_RULES": json.dumps(rules)}):
+            a = worth.decide(self.task("diagnose", intent="Diagnose why a job failed"))
+        self.assertEqual((a["worthy"], a["kind"]), (False, "investigation"))
+
+    def test_the_decision_is_kept_until_the_sessions_change(self):
+        from refine import worth
+        os.environ["FAKE_CLAUDE_LOG"] = str(self.t / "calls.jsonl")
+        p = self.task("release")
+        worth.decide(p)
+        worth.decide(self.store.load_pattern("release"))
+        self.assertEqual(len(self.calls()), 1)                                     # reused
+        p = self.store.load_pattern("release")
+        p["session_ids"] = p["session_ids"][:2]
+        self.store.save_pattern(p)
+        self.assertIsNone(worth.current(p))
+        worth.decide(p)
+        self.assertEqual(len(self.calls()), 2)                                     # sessions changed: decided again
+
+    def test_the_background_run_briefs_only_tasks_worth_a_skill(self):
+        from refine import refine
+        self.add_sessions()
+        self.auto.set_config(enabled=True, min_new_sessions=1)
+        self.task("release")
+        self.task("diagnose", intent="Diagnose why a job failed")
+        rules = {"Diagnose": [False, "investigation", "different every time"]}
+        with mock.patch.object(self.auto, "infer_ratings", return_value={}), \
+                mock.patch("detect.cluster.apply_clusters", return_value=[]), \
+                mock.patch.dict(os.environ, {"FAKE_WORTH_RULES": json.dumps(rules)}):
+            r = self.auto.run(force=True)
+        self.assertEqual(r["briefs"], ["release"])
+        self.assertEqual(self.store.load_pattern("diagnose")["status"], "candidate")   # waits; never briefed
+        out = io.StringIO()
+        with redirect_stdout(out):
+            refine.main(["candidates"])
+        self.assertRegex(out.getvalue(), r"release .*\n    SKILL CANDIDATE: being learned")
+        self.assertRegex(out.getvalue(), r"diagnose .*\n    NOT A SKILL \(investigation\): different every time")
+        self.assertIn("refine/refine.py brief <task>", out.getvalue())
+
+    def test_confirm_says_when_a_learnable_task_is_not_a_skill(self):
+        self.near_miss_setup()                                                     # tiny sessions: trivial
+        self.auto.confirm("deploy-service", accepted=["s-price"])
+        r = self.auto.confirm("deploy-service", accepted=["s-kv"])
+        self.assertEqual((r["status"], r["kind"]), ("not_a_skill", "same_day"))
+
     def test_confirm_learns_right_away(self):
         self.near_miss_setup()
         r = self.auto.confirm("deploy-service", accepted=["s-price"])
         self.assertEqual((r["status"], r["n_success"]), ("forming", 2))         # one confirmation isn't enough
-        r = self.auto.confirm("deploy-service", accepted=["s-kv"])
+        worthy = {"worthy": True, "kind": "procedure", "reason": "r", "confidence": 1.0}
+        with mock.patch("refine.worth.decide", return_value=worthy):            # (worthiness has its own tests)
+            r = self.auto.confirm("deploy-service", accepted=["s-kv"])
         self.assertEqual(r["status"], "briefed")
         self.assertTrue((Path(r["brief_path"]) / "BRIEF.md").exists())
         self.assertEqual(self.store.outcome("s-kv")["source"], "manual")

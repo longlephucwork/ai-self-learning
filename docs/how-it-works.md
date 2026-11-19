@@ -322,6 +322,28 @@ Claude shows users the tag's message as the release notes. A tag made on GitHub 
 2. The session is summarised, gets its own single-session pattern, and is drafted with the normal validation: tests from its real inputs and outputs, or for a skill, a judged check against it.
 3. The draft is labelled "quick learn: one session" in `review`, and still waits for your approval.
 
+### Is a repeated task worth a skill? (`refine/worth.py`)
+
+Repeating isn't enough. Before a task that needs judgment gets a skill brief, it's assessed once, and again whenever its sessions change:
+
+1. **Rules, with no model call.** A task is not a skill if:
+   - **`same_day`:** it has 2–3 repeats, all on one day (more likely one job retried than a task that recurs);
+   - **`trivial`:** it averages under 3 tool steps per session (Claude does it directly).
+2. **Judgment, one short Haiku call** over the sessions' summaries. The task is one of:
+   - **`procedure`:** a recurring way of doing something, with steps, conventions or project knowledge a skill can capture. Only this is worth a skill.
+   - **`generic`:** Claude does it well already.
+   - **`investigation`:** different every time.
+   - **`one_off`:** the same subject, but not a repeatable job.
+   - **`conversation`:** questions and discussion rather than a job.
+
+The decision comes with its evidence: repeats, distinct days, steps per session, how alike the sessions' steps are, and how often you corrected the result.
+
+- `refine.py candidates` lists every repeated task with its decision.
+- `refine.py assess <task>` decides again.
+- `refine.py brief <task>` overrides a "not a skill" decision.
+- "Learn this" never waits for a decision.
+- Mechanical tasks aren't assessed: they become scripts or tools as before.
+
 ### Long sessions are split into their jobs automatically
 
 One session often does several separate jobs: update a repo, merge a PR, then release. Each summary lists the session's jobs, with the range of requests each one spans. Once the session has finished, if it did two or more jobs, the background run turns each job into an **automatic part**, a segment like the ones below, marked `"auto": true`.

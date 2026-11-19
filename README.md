@@ -79,6 +79,7 @@ You can also do it all by hand. Run these from `~/ai-self-learning` (on Windows,
 | `python3 refine/refine.py learn --requests 7-9 --focus "..."` | learn only that part of the session |
 | `python3 refine/refine.py report` | what's learned: uses, accuracy, and what's ready to become automatic |
 | `python3 refine/refine.py auto-status` | automatic learning on/off, this month's spend, what's waiting |
+| `python3 refine/refine.py candidates` | every repeated task: is it a skill candidate, and why or why not |
 | `python3 refine/refine.py memory` | every task's memory path: short-term or long-term, strength, fading |
 | `python3 refine/refine.py auto-config` | show or change the budget, how often it runs, and how many sessions it waits for (below) |
 | `python3 registry/install.py list` | what's installed |

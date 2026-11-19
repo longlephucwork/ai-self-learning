@@ -692,6 +692,7 @@ class Memory(p4.Phase4):
         d = self.store.session_dir(sid)
         rec = json.loads((d / "session.json").read_text())
         rec["ended_at"] = (datetime.now(timezone.utc) - timedelta(days=days_ago)).isoformat().replace("+00:00", "Z")
+        rec["last_activity_at"] = rec["ended_at"]
         self.store.write_json_atomic(d / "session.json", rec)
 
     def short_term(self, key, ages, *, quick=False):
