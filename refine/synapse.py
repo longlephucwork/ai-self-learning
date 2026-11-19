@@ -2,7 +2,8 @@
 
 Each task the harness has seen (a pattern) has a path, worked out from its history with no model call:
 
-  strength   the synapse weight. Every successful repeat adds 1; between repeats it decays exponentially:
+  strength   the synapse weight. Every repeat adds 1 (any session of the task not rated `redone`: practice is
+             practice, even before its outcome is known); between repeats it decays exponentially:
              strength(t) = weight * 0.5 ** (days since the last repeat / stability)
   stability  how slowly the path fades: a half-life in days. It starts at `memory_days` (30). Practice spread
              out over time builds it (the spacing effect): each repeat on a later day doubles it, up to a year.
@@ -72,9 +73,10 @@ def path(pattern: dict, *, now: datetime | None = None) -> dict:
     """The memory path of one pattern: stage, strength, stability, and whether it's fading or forgotten."""
     from registry import install as reg
     now = now or datetime.now(timezone.utc)
-    ok = set(pattern.get("success_outcomes", ["accepted", "edited"]))
     members = [s for s in pattern.get("session_ids", []) if s not in pattern.get("excluded_injection", [])]
-    repeats = {s: t for s in members if store.outcome(s)["outcome"] in ok and (t := _session_time(s))}
+    # Every session of the task is a repeat, unless it was rated `redone`. Counting only known-good ones made a task
+    # whose outcomes were still unclear (waiting for the user to confirm) look unpractised, so it was forgotten.
+    repeats = {s: t for s in members if store.outcome(s)["outcome"] != "redone" and (t := _session_time(s))}
     status = pattern.get("status")
     items = [e for e in reg.load_registry()["installed"].values() if e["pattern_key"] == pattern["key"]]
     stage = ("automatic" if any(e["type"] in ("script", "tool") for e in items) else "long-term") \
@@ -130,8 +132,8 @@ def forget_faded(now: datetime | None = None, log=lambda *_: None) -> list[str]:
         if p.get("status") not in SHORT_TERM or p.get("quick"):
             continue
         r = path(p, now=now)
-        if r["strength"] >= FORGET_BELOW:
-            continue
+        if r["strength"] >= FORGET_BELOW or not r["last"]:
+            continue   # strong enough, or no dated repeat to judge it by: never forget on missing data
         released |= set(p.get("session_ids", []))
         store.delete_pattern(p["key"])
         gone.append(p["key"])

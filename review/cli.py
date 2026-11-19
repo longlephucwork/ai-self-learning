@@ -426,8 +426,34 @@ def cmd_allowed_hosts(args):
     return 0
 
 
+def _reject_brief(name: str, reason: str) -> int:
+    """Turn down a skill brief that was never built: the task isn't proposed again (an update brief just goes)."""
+    from refine.brief import briefs_dir
+    bdir = briefs_dir() / name
+    meta = store.read_json(bdir / "brief.json")
+    if not meta or meta.get("status") != "waiting":
+        raise LookupError(f"no draft or waiting skill brief named {name!r} (see `cli.py proposals`, learned/briefs/)")
+    ts = store.now()
+    store.write_json_atomic(bdir / "brief.json", {**meta, "status": "rejected",
+                                                 "decision": {"decision": "rejected", "at": ts, "note": reason}})
+    if not meta.get("improve"):
+        pattern = store.load_pattern(meta["pattern_key"])
+        if pattern:
+            pattern["status"] = "rejected"
+            pattern["rejected"] = {"at": ts, "reason": reason, "brief": name,
+                                   "n_success_at_rejection": pattern.get("n_success")}
+            store.save_pattern(pattern)
+        print(f"rejected the skill brief {name}; that task won't be proposed again")
+    else:
+        print(f"dropped the update brief for {name}; the installed skill stays as it is")
+    return 0
+
+
 def cmd_reject(args):
-    proposal, _, d = _draft(args.draft)
+    try:
+        proposal, _, d = replay.load_draft(args.draft)
+    except LookupError:
+        return _reject_brief(args.draft, args.reason)   # nothing drafted yet: maybe a brief waiting to be built
     if proposal["status"] == "installed":
         raise LookupError("draft is installed; use registry/install.py uninstall instead")
     c = reg.reject(proposal, draft_dir=d, reason=args.reason, use_git=not args.no_git)

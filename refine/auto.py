@@ -333,9 +333,14 @@ outcome:
 - edited: the user had to correct or adjust the result (asked for changes, fixed it themselves), but kept it
 - redone: the result was rejected, abandoned, or had to be done again a different way
 - unknown: not enough evidence (no real task, the session was cut off, or you can't tell)
-confidence: 0..1, how sure you are. A task that was completed and the user didn't push back on is
-"accepted" with moderate confidence (about 0.65), never higher, even in a long session with follow-up
-questions. Use "unknown" only when you really can't tell whether the task got done.
+confidence: 0..1, how sure you are that the outcome you chose is right:
+- the task visibly reached its goal (a build, deploy, PR, file or answer the user moved on from): 0.7-0.85,
+  whether that's "accepted" or, if the user corrected things on the way and kept the result, "edited"
+- the goal was probably reached but the end is ambiguous: about 0.6
+- below 0.5 only when you really can't tell
+Corrections and pushback during a session don't make it unclear: if the work was kept, it's "edited", and you
+can be as sure of that as of "accepted". Use "unknown" only when you really can't tell whether the task got
+done (a session cut off mid-task, or with no real task).
 note: for "edited" or "redone", what the user wanted changed, in their words where possible; else ""."""
 
 
@@ -377,10 +382,12 @@ def infer_ratings(sids: list[str], *, min_confidence: float, model: str | None =
             continue
         outcome = res["outcome"] if res["confidence"] >= min_confidence else "unknown"
         rec = store.load_session(sid) or {}
+        # the rater's guess is kept even when it's too unsure to count: a confirmation question can show it
         store.rate(sid, outcome, res["note"] or None, source="inferred", confidence=round(res["confidence"], 2),
-                   reason=res["reason"][:300], content_hash=rec.get("content_hash"))
+                   reason=res["reason"][:300], content_hash=rec.get("content_hash"), guess=res["outcome"])
         counts["rated" if outcome != "unknown" else "unknown"] += 1
-        log(f"  rate {sid[:8]}: {outcome} ({res['confidence']:.2f}) {res['reason'][:80]}")
+        guessed = f", guessed {res['outcome']}" if outcome == "unknown" and res["outcome"] != "unknown" else ""
+        log(f"  rate {sid[:8]}: {outcome} ({res['confidence']:.2f}{guessed}) {res['reason'][:80]}")
     return counts
 
 
@@ -447,7 +454,7 @@ def near_misses(min_success: int | None = None) -> list[dict]:
     min_success = int(min_success or config()["min_success"])
     out = []
     for p in store.iter_patterns():
-        if p.get("status") != "forming":
+        if p.get("status") != "forming" or p.get("confirm_dismissed"):
             continue
         c = recount(p)
         need = min_success - len(c["success"])
@@ -502,7 +509,9 @@ def confirm_context(items: list[dict]) -> list[str]:
         sess = []
         for sid in it["unknown"][:6]:
             rec = store.load_session(sid) or {}
-            sess.append(f"{sid[:8]} ({(rec.get('started_at') or '')[:10]}: {(rec.get('first_request') or '')[:60]!r})")
+            g = store.outcome(sid).get("guess")
+            sess.append(f"{sid[:8]} ({(rec.get('started_at') or '')[:10]}: {(rec.get('first_request') or '')[:60]!r}"
+                        + (f"; looks {g}" if g and g != "unknown" else "") + ")")
         lines.append(f"- '{it['label']}' ({it['description'][:120]}): done {it['n_sessions']} times, "
                      f"{it['n_success']} known to have worked; unclear: {', '.join(sess)}")
     lines += [f"Ask whether those went well. Then record the answer: {py} {tool} confirm <pattern> "
@@ -511,7 +520,8 @@ def confirm_context(items: list[dict]) -> list[str]:
               "If it prints SKILL BRIEF, offer to build the skill with skill-creator right away (BRIEF.md is the "
               "captured intent; it says where to write the skill and to run `review/cli.py adopt <name>` after). If "
               "it prints a validated draft, offer to show it. Install nothing without the user's explicit yes. If the "
-              "user doesn't want to answer, drop it."]
+              "user doesn't want to answer now, drop it: the question comes back in a week. If they don't want to be "
+              f"asked about that task again: {py} {tool} confirm <pattern> --never"]
     return lines
 
 
@@ -799,7 +809,8 @@ def brief_context(briefs: list[dict]) -> list[str]:
                f"cases, and write the skill into {b['target']}/ (not into ~/.claude/skills: approve installs it there, "
                f"and a copy made by hand isn't tracked). When it's done, run: {py} {cli} adopt {b['name']}"),
               f"then offer to show it ({py} {cli} review {b['name']}) and approve only on the user's explicit yes.",
-              "Don't bring it up again if they decline or ignore it."]
+              ("If they decline or ignore it, drop it for now: it's offered again in a week while the brief waits. "
+               f"If they don't want that skill at all: {py} {cli} reject {b['name']} --reason \"<why>\"")]
     return lines
 
 
@@ -892,13 +903,17 @@ def session_start_context() -> str | None:
     seen_path = store.store_dir() / "notified.json"
     seen = store.read_json(seen_path) or {}
     fresh = [i for i in items if seen.get(i["draft"]) != i["fingerprint"]]
-    fresh_briefs = [b for b in waiting() if seen.get("brief:" + b["name"]) != b.get("id", b["created_at"])]
+    # briefs not built yet and unanswered confirmations come back weekly (once was easy to miss for good)
+    week = datetime.now(timezone.utc).strftime("%G-W%V")
+    stuck_names = {x["name"] for x in stuck_skills()}   # those have their own note
+    fresh_briefs = [b for b in waiting() if b["name"] not in stuck_names
+                    and seen.get("brief:" + b["name"]) != f"{b.get('id', b['created_at'])}|{week}"]
     for b in fresh_briefs:
-        seen["brief:" + b["name"]] = b.get("id", b["created_at"])
-    to_confirm = [n for n in near_misses() if seen.get("confirm:" + n["pattern"]) != ",".join(sorted(n["unknown"]))]
+        seen["brief:" + b["name"]] = f"{b.get('id', b['created_at'])}|{week}"
+    to_confirm = [n for n in near_misses()
+                  if seen.get("confirm:" + n["pattern"]) != ",".join(sorted(n["unknown"])) + f"|{week}"]
     for n in to_confirm:
-        seen["confirm:" + n["pattern"]] = ",".join(sorted(n["unknown"]))
-    week = datetime.now(timezone.utc).strftime("%G-W%V")   # stuck skills are re-announced weekly until fixed
+        seen["confirm:" + n["pattern"]] = ",".join(sorted(n["unknown"])) + f"|{week}"
     stuck = [x for x in stuck_skills() if seen.get("stuck:" + x["name"]) != f"{x['validated_at']}|{week}"]
     for x in stuck:
         seen["stuck:" + x["name"]] = f"{x['validated_at']}|{week}"

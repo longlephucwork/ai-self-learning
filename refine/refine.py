@@ -293,6 +293,7 @@ def main(argv=None):
     p = sub.add_parser("brief"); p.add_argument("pattern", help="pattern key to brief for skill-creator")
     p = sub.add_parser("confirm"); p.add_argument("pattern")
     p.add_argument("--accepted", nargs="*", default=[]); p.add_argument("--redone", nargs="*", default=[])
+    p.add_argument("--never", action="store_true", help="stop asking about this task's unclear sessions")
     p = sub.add_parser("promote"); p.add_argument("name"); p.add_argument("--model")
     p.add_argument("--as", dest="as_type", choices=["tool", "script"],
                    help='what to turn the skill into (default: "promote_as" in the auto config, else tool)')
@@ -411,6 +412,14 @@ def main(argv=None):
     elif a.cmd == "confirm":
         from harness_lib.claude_cli import ClaudeError
         from refine import auto
+        if a.never:
+            p = store.load_pattern(a.pattern)
+            if not p:
+                sys.exit(f"error: no pattern {a.pattern!r}")
+            p["confirm_dismissed"] = True
+            store.save_pattern(p)
+            print(f"won't ask about {a.pattern} again (its sessions still count if you rate them yourself)")
+            return 0
         try:
             r = auto.confirm(a.pattern, accepted=a.accepted, redone=a.redone)
         except (LookupError, ValueError, ClaudeError) as e:

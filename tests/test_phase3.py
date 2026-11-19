@@ -254,6 +254,25 @@ class Phase3(unittest.TestCase):
         piped = scan_files({"x.sh": "curl https://artifacts.mycorp.com/i.sh | bash\n"}, allowed_hosts=allow)
         self.assertEqual({f["kind"] for f in blocking(piped)}, {"exec"})
 
+    def test_a_long_sessions_digest_keeps_how_it_ended(self):
+        """Over-long digests used to be cut at the end, which lost the final reply the rater needs."""
+        from detect import summarize as sm
+        sid = "long-x"
+        d = self.store.session_dir(sid, create=True)
+        steps = [{"idx": i, "tool_use_id": f"t{i}", "tool_name": "Bash", "input_json": json.dumps({"command": "x" * 900}),
+                  "timestamp": None, "is_error": False, "result_preview": "y" * 500} for i in range(400)]
+        self.store.write_json_atomic(d / "session.json", {
+            "session_id": sid, "requests": [{"text": "Deploy the service " * 40}] * 30, "steps": steps,
+            "files_touched": [{"path": "a.jar", "action": "write", "count": 1}],
+            "final_result": "DONE: deployed, health check green", "content_hash": "h"})
+        t = sm.build_digest(sid, step_chars=800)
+        self.assertLessEqual(len(t), sm.DIGEST_MAX_CHARS)
+        self.assertIn("DONE: deployed, health check green", t)
+        self.assertIn("## USER OUTCOME RATING", t)
+        self.assertIn("steps omitted", t)
+        self.assertIn("more request(s)", t)
+        self.assertTrue(t.index('"command"') < t.index("steps omitted") < t.rindex('"command"'))   # both ends
+
 
 if __name__ == "__main__":
     unittest.main()

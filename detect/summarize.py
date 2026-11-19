@@ -74,37 +74,69 @@ Some sessions are ONE PART of a longer conversation, chosen by the user (the dat
 
 
 def build_digest(sid: str, step_chars: int = 400) -> str:
+    """A compact digest of one session for the model, at most DIGEST_MAX_CHARS. When a session is too long, the
+    middle tool steps go: what the user asked, how it ended (files, final reply) and the rating always stay, as
+    they say most about the task and its outcome."""
     s = store.load_session(sid)
     o = store.outcome(sid)
     steps = s["steps"]
 
-    parts = ["## USER REQUESTS"]
+    head = ["## USER REQUESTS"]
     seg = s.get("segment")
     if seg:
-        parts.append(f"(One part of a longer conversation: requests {seg['requests'][0]}-{seg['requests'][1]}, "
-                     f"which the user chose to learn on its own"
-                     + (f". The user describes it as: {seg['focus'][:300]}" if seg.get("focus") else "") + ")")
-    parts += [f"- {r['text'][:2000]}" for r in s["requests"]]
-    parts.append(f"\n## TOOL STEPS ({len(steps)} total)")
-    shown = steps if len(steps) <= MAX_STEPS_IN_DIGEST else \
-        steps[: MAX_STEPS_IN_DIGEST // 2] + [None] + steps[-MAX_STEPS_IN_DIGEST // 2:]
-    for st in shown:
-        if st is None:
-            parts.append(f"... {len(steps) - MAX_STEPS_IN_DIGEST} steps omitted ...")
-            continue
-        err = " [ERROR]" if st["is_error"] else ""
-        parts.append(f"- {st['tool_name']}{err}: {st['input_json'][:step_chars]}")
-        if st["result_preview"]:
-            parts.append(f"    -> {st['result_preview'][:max(200, step_chars // 4)]}")
+        head.append(f"(One part of a longer conversation: requests {seg['requests'][0]}-{seg['requests'][1]}, "
+                    f"which the user chose to learn on its own"
+                    + (f". The user describes it as: {seg['focus'][:300]}" if seg.get("focus") else "") + ")")
+    reqs = [f"- {r['text'][:2000]}" for r in s["requests"]]
+    if len("\n".join(reqs)) > DIGEST_MAX_CHARS // 3:   # many long requests: the first two and the last two, shorter
+        n = len(reqs)
+        reqs = [r[:600] for r in reqs]
+        if n > 4:
+            reqs = reqs[:2] + [f"- ... {n - 4} more request(s) ..."] + reqs[-2:]
+    head += reqs
+    tail = []
     if s["files_touched"]:
-        parts.append("\n## FILES TOUCHED")
-        parts += [f"- {f['action']}: {f['path']}" for f in s["files_touched"][:40]]
-    parts.append("\n## FINAL ASSISTANT MESSAGE")
-    parts.append((s.get("final_result") or "(none)")[:3000])
-    parts.append(f"\n## USER OUTCOME RATING\n{o['outcome']}" + (f" — {o['note']}" if o["note"] else ""))
-    text = "\n".join(parts)
-    if len(text) > DIGEST_MAX_CHARS:
-        text = text[: DIGEST_MAX_CHARS - 40] + "\n...[digest truncated]"
+        tail.append("\n## FILES TOUCHED")
+        tail += [f"- {f['action']}: {f['path']}" for f in s["files_touched"][:40]]
+    tail.append("\n## FINAL ASSISTANT MESSAGE")
+    tail.append((s.get("final_result") or "(none)")[:3000])
+    tail.append(f"\n## USER OUTCOME RATING\n{o['outcome']}" + (f" — {o['note']}" if o["note"] else ""))
+
+    def step_lines(st):
+        err = " [ERROR]" if st["is_error"] else ""
+        out = [f"- {st['tool_name']}{err}: {st['input_json'][:step_chars]}"]
+        if st["result_preview"]:
+            out.append(f"    -> {st['result_preview'][:max(200, step_chars // 4)]}")
+        return out
+
+    shown = steps if len(steps) <= MAX_STEPS_IN_DIGEST else steps[: MAX_STEPS_IN_DIGEST // 2] + steps[-MAX_STEPS_IN_DIGEST // 2:]
+    budget = DIGEST_MAX_CHARS - len("\n".join(head + tail)) - 200
+    first, last = [], []   # fill from both ends of the steps, so the session's start and end survive
+    a, b, used = 0, len(shown) - 1, 0
+    while a <= b:
+        for side in ("start", "end"):
+            if a > b:
+                break
+            st = shown[a] if side == "start" else shown[b]
+            lines = step_lines(st)
+            size = len("\n".join(lines)) + 1
+            if used + size > budget:
+                a = b + 1
+                break
+            used += size
+            if side == "start":
+                first += lines
+                a += 1
+            else:
+                last = lines + last
+                b -= 1
+    omitted = len(steps) - (len([x for x in first if x.startswith("- ")]) + len([x for x in last if x.startswith("- ")]))
+    body = [f"\n## TOOL STEPS ({len(steps)} total)"] + first \
+        + ([f"... {omitted} steps omitted ..."] if omitted > 0 else []) + last
+    text = "\n".join(head + body + tail)
+    if len(text) > DIGEST_MAX_CHARS:   # only if the fixed parts alone are too long
+        keep = "\n".join(tail)
+        text = text[: DIGEST_MAX_CHARS - len(keep) - 40] + "\n...[digest truncated]\n" + keep
     return text
 
 

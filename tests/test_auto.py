@@ -316,6 +316,59 @@ class Auto(unittest.TestCase):
         self.store.rate("s-price", "unknown", source="inferred")                 # same unclear set: still quiet
         self.assertIsNone(self.auto.session_start_context())
 
+    def test_a_task_waiting_for_confirmation_is_not_forgotten(self):
+        """The bug that lost 'ticket to feature PR': all its outcomes were unclear, so it had no repeats and
+        strength 0, and the next run forgot it."""
+        from refine import synapse
+        self.near_miss_setup()
+        for sid in ("s-fruit", "s-price", "s-kv"):
+            self.store.rate(sid, "unknown", source="inferred", confidence=0.55)
+        p = synapse.path(self.store.load_pattern("deploy-service"))
+        self.assertEqual(p["repeats"], 3)
+        self.assertEqual(synapse.forget_faded(), [])
+        self.assertTrue(self.store.load_pattern("deploy-service"))
+        self.store.rate("s-kv", "redone")                                         # a redone session isn't practice
+        self.assertEqual(synapse.path(self.store.load_pattern("deploy-service"))["repeats"], 2)
+
+    def test_the_raters_guess_is_kept_and_shown(self):
+        self.add_sessions(["s-fruit"])
+        os.environ["FAKE_RATE_CONF"] = "0.55"
+        self.auto.infer_ratings(["s-fruit"], min_confidence=0.6)
+        o = self.store.outcome("s-fruit")
+        self.assertEqual((o["outcome"], o["guess"]), ("unknown", "accepted"))    # too unsure to count, but kept
+        self.assertIn("guessed accepted", (self.store.store_dir() / "auto.log").read_text())
+        self.near_miss_setup()
+        self.store.rate("s-price", "unknown", source="inferred", confidence=0.55, guess="edited")
+        self.assertIn("looks edited", self.auto.session_start_context())
+        self.assertIn("pushback during a session don't make it unclear", self.auto.RATE_SYSTEM)
+
+    def test_unanswered_questions_and_unbuilt_briefs_come_back_weekly(self):
+        self.near_miss_setup()
+        from refine.brief import write_brief
+        self.store.save_pattern({**self.store.load_pattern("deploy-service"), "key": "release-notes", "status": "candidate",
+                                 "label": "release notes"})
+        write_brief("release-notes")
+        text = self.auto.session_start_context()
+        self.assertIn("'deploy service'", text); self.assertIn("release-notes", text)
+        self.assertIsNone(self.auto.session_start_context())                     # once this week
+        seen_path = self.store.store_dir() / "notified.json"
+        seen = {k: v.rsplit("|", 1)[0] + "|2000-W01" for k, v in json.loads(seen_path.read_text()).items()}
+        seen_path.write_text(json.dumps(seen))                                   # a week later
+        text = self.auto.session_start_context()
+        self.assertIn("'deploy service'", text); self.assertIn("release-notes", text)
+        from refine import refine
+        with redirect_stdout(io.StringIO()):
+            refine.main(["confirm", "deploy-service", "--never"])
+        self.assertEqual(self.auto.near_misses(), [])                            # stopped for good
+        from review import cli
+        out = io.StringIO()
+        with redirect_stdout(out):
+            self.assertEqual(cli.main(["reject", "release-notes", "--reason", "not needed"]), 0)
+        self.assertIn("won't be proposed again", out.getvalue())
+        self.assertEqual(self.store.load_pattern("release-notes")["status"], "rejected")
+        from refine.brief import waiting
+        self.assertEqual([b["name"] for b in waiting()], [])
+
     def test_confirm_learns_right_away(self):
         self.near_miss_setup()
         r = self.auto.confirm("deploy-service", accepted=["s-price"])

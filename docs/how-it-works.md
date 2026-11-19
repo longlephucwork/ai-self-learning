@@ -339,7 +339,7 @@ To make the background run do this for every task, set `"min_success": 1` under 
 
 Repeated work builds a path, like a synapse. It strengthens with practice and fades without it. `refine.py memory` shows every task's path.
 
-- **Strength** (the synapse weight): every successful repeat adds 1. Between repeats it decays exponentially, halving every *stability* days.
+- **Strength** (the synapse weight): every repeat adds 1: any session of the task that wasn't rated `redone`, including ones whose outcome is still unclear. Between repeats it decays exponentially, halving every *stability* days.
 - **Stability:** starts at `memory_days` (30). Spaced practice builds it: each repeat on a later day doubles it, up to a year. Repeats on the same day add strength but no stability, as massed practice does.
 
 | Stage | What | How it changes |
