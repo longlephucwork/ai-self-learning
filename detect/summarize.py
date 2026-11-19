@@ -21,6 +21,8 @@ from harness_lib.claude_cli import ClaudeError, DEFAULT_MODEL, run_structured  #
 from harness_lib.schema_check import validate  # noqa: E402
 
 DIGEST_MAX_CHARS = 24_000
+MAX_TASKS = 6               # separate jobs listed per session (refine/segment.py splits on them)
+BACKFILL_PER_RUN = 20       # older summaries without a task list, re-summarised per run
 MAX_STEPS_IN_DIGEST = 60
 
 _str = lambda n: {"type": "string", "maxLength": n}  # noqa: E731
@@ -39,6 +41,11 @@ SUMMARY_SCHEMA = {
         "tools_used": _arr(20, 60),
         "injection_suspected": {"type": "boolean"},
         "injection_note": _str(300),
+        "tasks": {"type": "array", "maxItems": MAX_TASKS, "items": {
+            "type": "object",
+            "properties": {"title": _str(120), "first_request": {"type": "integer", "minimum": 1},
+                           "last_request": {"type": "integer", "minimum": 1}},
+            "required": ["title", "first_request", "last_request"]}},
     },
     "required": ["intent", "task_family", "inputs", "outputs", "steps", "deterministic",
                  "deterministic_reason", "tools_used", "injection_suspected"],
@@ -69,6 +76,12 @@ If one of the EXISTING FAMILIES fits, reuse it exactly.
 - deterministic: true only if the input -> output mapping is fully specified, so plain code could \
 do the whole job with no judgment, writing or interpretation. Explain in deterministic_reason.
 - tools_used: Claude Code tool names that mattered.
+- tasks: the separate jobs in the session, in order, each with the numbers of the user requests it spans
+  (first_request..last_request, as numbered under USER REQUESTS). A job is a piece of work with its own goal
+  that could be done on its own another day: e.g. "update the repo", then "merge the PR", then "release". Follow-up
+  requests that refine the same job (fixes, "try again", questions about it) belong to that job, not a new one.
+  List a job only if its requests are shown. If the session does one job, give one entry covering it, or none.
+  The summary fields above describe the session's main job.
 
 Some sessions are ONE PART of a longer conversation, chosen by the user (the data says so at the top). Summarize only that part, as a task in its own right: its first request may lean on earlier work ("now release it"), so describe the task it does, not the conversation around it."""
 
@@ -87,12 +100,12 @@ def build_digest(sid: str, step_chars: int = 400) -> str:
         head.append(f"(One part of a longer conversation: requests {seg['requests'][0]}-{seg['requests'][1]}, "
                     f"which the user chose to learn on its own"
                     + (f". The user describes it as: {seg['focus'][:300]}" if seg.get("focus") else "") + ")")
-    reqs = [f"- {r['text'][:2000]}" for r in s["requests"]]
+    reqs = [f"{n}. {r['text'][:2000]}" for n, r in enumerate(s["requests"], 1)]   # numbered: `tasks` refers to them
     if len("\n".join(reqs)) > DIGEST_MAX_CHARS // 3:   # many long requests: the first two and the last two, shorter
         n = len(reqs)
         reqs = [r[:600] for r in reqs]
         if n > 4:
-            reqs = reqs[:2] + [f"- ... {n - 4} more request(s) ..."] + reqs[-2:]
+            reqs = reqs[:2] + [f"... requests 3-{n - 2} not shown ..."] + reqs[-2:]
     head += reqs
     tail = []
     if s["files_touched"]:
@@ -167,10 +180,19 @@ def _is_active(rec: dict, idle_minutes: int) -> bool:
 PROMPT_VERSION = 2   # bump when the summary prompt changes in a way that should redo some summaries
 
 
-def pending_sessions(*, force=False, include_active=False, idle_minutes=30, only=None):
-    """Sessions with no summary, or whose content changed since it was summarized."""
+def _needs_tasks(r: dict, summ: dict | None) -> bool:
+    """A finished session of several requests summarised before summaries listed the jobs in it."""
+    return bool(summ) and "tasks" not in summ.get("summary", {}) and not store.is_segment(r["session_id"]) \
+        and bool(r.get("ended_at")) and (r.get("n_requests") or 0) >= 3
+
+
+def pending_sessions(*, force=False, include_active=False, idle_minutes=30, only=None,
+                     backfill: int = BACKFILL_PER_RUN):
+    """Sessions with no summary, or whose content changed since it was summarized; plus up to `backfill` older
+    summaries that don't list the session's jobs yet (so long sessions can be split into them)."""
     recs = sorted(store.iter_sessions(), key=lambda r: r.get("last_activity_at") or "")
     out, skipped_active = [], []
+    backfilled = 0
     for r in recs:
         sid = r["session_id"]
         if only and sid not in only:
@@ -179,7 +201,9 @@ def pending_sessions(*, force=False, include_active=False, idle_minutes=30, only
         stale_flag = bool(summ and summ.get("summary", {}).get("injection_suspected")
                           and summ.get("prompt_version", 1) < PROMPT_VERSION)  # re-check old injection flags
         if not force and summ and summ.get("source_content_hash") == r.get("content_hash") and not stale_flag:
-            continue
+            if not (backfilled < backfill and _needs_tasks(r, summ)):
+                continue
+            backfilled += 1
         if not include_active and _is_active(r, idle_minutes):
             skipped_active.append(sid)
             continue

@@ -48,6 +48,8 @@ If you decline, a background run (every few hours, within $5/month) still learns
 
 **Learn right away:** say **"learn this"** in any session. Claude asks before installing anything.
 
+**Long sessions count job by job:** when one session does several separate jobs (update the repo, merge a PR, release), the background run splits it into one part per job, and each job counts toward learning on its own.
+
 **Learn just one part:** in a long session (update the repo, merge a PR, then release), say **"learn the release part"**. Claude picks out the requests that make up that part, and only that part is learned.
 
 **Skills are built with [skill-creator](https://github.com/anthropics/skills).** The harness never writes a skill itself. When a task needs judgment, it prepares a brief from your sessions: what you asked, what you accepted, your corrections, and ready-made test cases. Claude then offers to build the skill with skill-creator, together with you. Scripts and tools are drafted and tested by the harness. The installer adds skill-creator if Claude Code doesn't already have it.

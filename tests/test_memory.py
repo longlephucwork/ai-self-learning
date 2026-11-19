@@ -171,6 +171,100 @@ class Memory(p4.Phase4):
         ingest(str(tp), hook_event="SessionEnd", end_reason="other", session_id=sid)
         return sid, c, j
 
+    JOBS = ({"title": "Answer a question about the repo", "first_request": 1, "last_request": 1},
+            {"title": "Convert a CSV file to JSON", "first_request": 2, "last_request": 2},
+            {"title": "Write release notes", "first_request": 3, "last_request": 3})
+
+    def summarised_long_session(self, jobs=None):
+        from detect import summarize as sm
+        sid, _, _ = self.long_session()
+        with mock.patch.dict(os.environ, {"FAKE_TASKS": json.dumps({"what does this repo do": jobs or self.JOBS})}):
+            sm.summarize_sessions([sid], log=lambda *_: None)
+        return sid
+
+    def test_a_long_session_is_split_into_its_jobs(self):
+        from detect import cluster as cl
+        from detect import summarize as sm
+        from refine import segment as sg
+        sid = self.summarised_long_session()
+        made = sg.split_sessions()
+        self.assertEqual(sorted(made), [f"{sid}~r1-1", f"{sid}~r2-2", f"{sid}~r3-3"])
+        part = self.store.load_session(f"{sid}~r2-2")
+        self.assertEqual([q["text"] for q in part["requests"]], ["Convert in.csv to JSON"])
+        self.assertEqual(part["segment"]["focus"], "Convert a CSV file to JSON")
+        self.assertTrue(part["segment"]["auto"])
+        self.assertEqual(sg.split_sessions(), [])                              # already split: nothing to do
+        sm.summarize_sessions(made + ["s-fruit"], log=lambda *_: None)
+        ids = {x["session_id"]: x["task_family"] for x in cl.load_summaries()}
+        self.assertNotIn(sid, ids)                                             # the parts stand in for the session
+        self.assertEqual(ids[f"{sid}~r2-2"], ids["s-fruit"])                   # the CSV job joins the CSV task
+        self.assertNotEqual(ids[f"{sid}~r1-1"], ids["s-fruit"])
+
+    def test_one_job_or_nonsense_ranges_dont_split(self):
+        from refine import segment as sg
+        self.summarised_long_session(jobs=[{"title": "All of it", "first_request": 1, "last_request": 3}])
+        self.assertEqual(sg.split_sessions(), [])
+        bad = [{"title": "a", "first_request": 1, "last_request": 2}, {"title": "overlaps", "first_request": 2,
+               "last_request": 3}, {"title": "out of range", "first_request": 3, "last_request": 9}]
+        self.assertEqual(sg._jobs({"tasks": bad}, 3), [])                     # only one usable job left
+
+    def test_a_resumed_session_is_split_again(self):
+        from detect import summarize as sm
+        from refine import segment as sg
+        sid = self.summarised_long_session()
+        sg.split_sessions()
+        two = [{"title": "Question and CSV", "first_request": 1, "last_request": 2},
+               {"title": "Release notes", "first_request": 3, "last_request": 3}]
+        rec = self.store.load_session(sid)
+        rec["content_hash"] = "changed"                                         # resumed: new content
+        self.store.write_json_atomic(self.store.session_dir(sid) / "session.json", rec)
+        with mock.patch.dict(os.environ, {"FAKE_TASKS": json.dumps({"what does this repo do": two})}):
+            sm.summarize_sessions([sid], log=lambda *_: None)
+        made = sg.split_sessions()
+        self.assertEqual(sorted(made), [f"{sid}~r1-2", f"{sid}~r3-3"])
+        self.assertEqual(sorted(x["id"] for x in sg.auto_segments(sid)), [f"{sid}~r1-2", f"{sid}~r3-3"])  # old gone
+
+    def test_a_part_made_by_hand_is_left_alone(self):
+        from refine import segment as sg
+        sid = self.summarised_long_session()
+        sg.make_segment(sid, "2", focus="my csv part")                          # `learn --requests 2`
+        made = sg.split_sessions()
+        self.assertNotIn(f"{sid}~r2-2", made)
+        self.assertEqual(self.store.load_session(f"{sid}~r2-2")["segment"]["focus"], "my csv part")
+
+    def test_parts_are_rated_but_hand_made_ones_are_not(self):
+        from refine import auto
+        from refine import segment as sg
+        sid = self.summarised_long_session()
+        sg.split_sessions()
+        sg.make_segment(sid, "1-2", focus="by hand")
+        todo = auto.sessions_to_rate()
+        self.assertIn(f"{sid}~r2-2", todo)
+        self.assertNotIn(f"{sid}~r1-2", todo)
+
+    def test_older_summaries_are_redone_to_find_jobs(self):
+        from detect import summarize as sm
+        sid, _, _ = self.long_session()
+        sm.summarize_sessions([sid], log=lambda *_: None)
+        rec = self.store.load_summary(sid)
+        rec["summary"].pop("tasks", None)                                       # summarised before job lists
+        self.store.save_summary(sid, rec)
+        self.assertIn(sid, sm.pending_sessions()[0])
+        self.assertNotIn(sid, sm.pending_sessions(backfill=0)[0])
+
+    def test_the_background_run_splits_and_learns_the_parts(self):
+        from refine import auto
+        sid, _, _ = self.long_session()
+        auto.set_config(enabled=True, min_new_sessions=1)
+        with mock.patch.dict(os.environ, {"FAKE_TASKS": json.dumps({"what does this repo do": self.JOBS})}):
+            r = auto.run(force=True)
+        self.assertEqual(sorted(r["split"]), [f"{sid}~r1-1", f"{sid}~r2-2", f"{sid}~r3-3"])
+        for part in r["split"]:
+            self.assertTrue(self.store.load_summary(part))                     # summarised in the same run
+            self.assertNotEqual(self.store.outcome(part)["outcome"], "unknown")   # and rated
+        auto.set_config(split_tasks=False)
+        self.assertEqual(auto.config()["split_tasks"], False)
+
     def test_list_numbers_the_requests(self):
         sid, _, _ = self.long_session()
         rc, out = self.cli_refine("learn", sid, "--list")

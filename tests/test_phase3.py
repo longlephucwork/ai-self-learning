@@ -270,7 +270,7 @@ class Phase3(unittest.TestCase):
         self.assertIn("DONE: deployed, health check green", t)
         self.assertIn("## USER OUTCOME RATING", t)
         self.assertIn("steps omitted", t)
-        self.assertIn("more request(s)", t)
+        self.assertIn("requests 3-28 not shown", t)                           # numbers stay right
         self.assertTrue(t.index('"command"') < t.index("steps omitted") < t.rindex('"command"'))   # both ends
 
 

@@ -322,6 +322,17 @@ Claude shows users the tag's message as the release notes. A tag made on GitHub 
 2. The session is summarised, gets its own single-session pattern, and is drafted with the normal validation: tests from its real inputs and outputs, or for a skill, a judged check against it.
 3. The draft is labelled "quick learn: one session" in `review`, and still waits for your approval.
 
+### Long sessions are split into their jobs automatically
+
+One session often does several separate jobs: update a repo, merge a PR, then release. Each summary lists the session's jobs, with the range of requests each one spans. Once the session has finished, if it did two or more jobs, the background run turns each job into an **automatic part**, a segment like the ones below, marked `"auto": true`.
+
+- Each part is rated, summarised and grouped like a session of its own, in the same run. So a release done inside a long session counts toward your "release" task, and can make it learnable.
+- The whole session is left out of grouping once it has parts, so its work isn't counted twice.
+- If a split session is resumed and changes, its parts are made again. Old parts that a brief or an installed item uses as evidence are kept.
+- A part you made with `learn --requests` is never replaced.
+- Sessions summarised before job lists existed are summarised again, up to 20 per run, so earlier long sessions get split too.
+- To turn it off, set `"split_tasks": false` under `"auto"` in `store/config.json`.
+
 ### Learning one part of a session (`refine/segment.py`)
 
 A long session often does several jobs in a row: update a repo, merge a PR, then release. To learn just one of them, say so ("learn the release part"). The built-in skill makes Claude number the session's requests with `refine.py learn --list`, pick the ones that make up that part, and run `refine.py learn --requests 86-87 --focus "release a new version"`. You can run the same commands yourself. `--requests` takes `N`, `N-M` or `N-` (to the last request).

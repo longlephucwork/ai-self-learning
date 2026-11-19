@@ -72,12 +72,14 @@ essential.
 
 
 def load_summaries() -> list[dict]:
+    from refine.segment import split_parents
     from refine.synapse import forgotten_sessions
     forgotten = forgotten_sessions()   # a forgotten task isn't re-formed from its stale sessions
+    split = split_parents()            # a session split into its jobs: the parts stand in for it
     out = []
     for r in store.iter_sessions():
         sid = r["session_id"]
-        if sid in forgotten:
+        if sid in forgotten or sid in split:
             continue
         rec = store.load_summary(sid)
         if not rec:

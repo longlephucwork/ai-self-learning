@@ -20,6 +20,7 @@ Settings, in store/config.json under "auto" (defaults shown). Change them with `
   promote_min_uses: 5   promote_min_accuracy: 0.9   promote_min_mechanical: 0.75
   promote_as: "tool"   (what a promoted skill becomes: "tool" or "script")
   memory_days: 30   (how long an unpractised task takes to half fade from short-term memory; refine/synapse.py)
+  split_tasks: true (split finished sessions that did several separate jobs into one part per job; refine/segment.py)
 Every model call's cost goes to store/spend.jsonl. Background runs stop when the month's spend reaches
 the budget, and each call's own limit is capped at what remains.
 """
@@ -43,7 +44,7 @@ DEFAULTS = {"enabled": False, "monthly_budget_usd": 5.0, "min_hours_between_runs
             "keep_days": 90,
             "max_drafts_per_run": 1, "retry_days": 7, "min_confidence": 0.6, "min_success": 3,
             "promote_min_uses": 5, "promote_min_accuracy": 0.9, "promote_min_mechanical": 0.75,
-            "promote_as": "tool", "memory_days": 30}
+            "promote_as": "tool", "memory_days": 30, "split_tasks": True}
 LOCK_STALE_S = 2 * 3600
 RETRY_AFTER_FAILURE = timedelta(hours=1)
 CHECK_EVERY = timedelta(minutes=10)   # the Stop hook (after every reply) checks at most this often
@@ -346,8 +347,10 @@ note: for "edited" or "redone", what the user wanted changed, in their words whe
 
 def sessions_to_rate() -> list[str]:
     out = []
-    for r in store.iter_sessions(segments=False):   # segments are rated by `learn` itself
+    for r in store.iter_sessions():
         sid = r["session_id"]
+        if store.is_segment(sid) and not (r.get("segment") or {}).get("auto"):
+            continue   # a part made with `learn --requests` is rated by `learn` itself
         if not r.get("ended_at"):
             continue
         hist = store.read_jsonl(store.session_dir(sid) / "ratings.jsonl")
@@ -645,6 +648,14 @@ def run(*, force: bool = False) -> dict:
         sids, _ = sm.pending_sessions()
         if sids:
             result["summaries"] = sm.summarize_sessions(sids, log=lambda m: log(m))
+        if cfg.get("split_tasks", True):
+            # a long session that did several separate jobs: each job becomes a part, learned on its own
+            from refine import segment as sg
+            parts = sg.split_sessions(log=lambda m: log(m))
+            if parts:
+                result["split"] = parts
+                infer_ratings(parts, min_confidence=cfg["min_confidence"])
+                sm.summarize_sessions(parts, log=lambda m: log(m))
         summaries = cl.load_summaries()
         if summaries:
             try:

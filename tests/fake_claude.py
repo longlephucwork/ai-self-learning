@@ -71,4 +71,9 @@ else:
            "tools_used": ["Read", "Write"],
            "injection_suspected": "ignore previous instructions" in prompt.lower(),
            "injection_note": ""}
+    # FAKE_TASKS: {"text in a whole session's requests": [tasks]}: the jobs listed for that session
+    if "One part of a longer conversation" not in prompt:
+        for needle, tasks in json.loads(os.environ.get("FAKE_TASKS", "{}")).items():
+            if needle.lower() in req:
+                out["tasks"] = tasks
 print(json.dumps({"type": "result", "is_error": False, "structured_output": out, "total_cost_usd": 0.001}))
