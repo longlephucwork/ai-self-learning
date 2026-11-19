@@ -399,6 +399,31 @@ With the default 30 days and no further repeats:
 - **"Learn this" is never forgotten.** A task you asked to learn isn't forgotten. Learning a forgotten task again brings its sessions back.
 - **Settings:** `refine.py auto-config --memory-days N` changes how quickly an unpractised task fades. The background run does the forgetting, right after grouping.
 
+## Agents: experts grouped from related skills (`refine/agents.py`)
+
+The harness also turns groups of related skills into Claude Code **subagents**, for example a `devops` agent for deploying, releasing and rolling back services. An agent is `~/.claude/agents/<name>.md`. Its `description` tells Claude when to delegate to it, its `skills:` field preloads those skills' full content, and its body is the agent's system prompt.
+
+1. **Inventory:** skills the harness installed, skills you made yourself in `~/.claude/skills/`, and installed scripts and MCP tools. The harness's own `learning-harness` and `skill-creator` skills are left out.
+2. **Group:** whenever the inventory changes, one short Haiku call groups related items by domain. A group of 2 or more items becomes an agent, and an existing agent keeps its name when its domain stays.
+3. **Draft:** one Sonnet call writes the agent's description and instructions from its members: their descriptions and `SKILL.md`, treated as data. The harness writes the frontmatter itself: `name`, `description`, `skills: [...]` and `model: inherit`. It sets no tools, hooks, permission mode or MCP servers, so the agent inherits the session's.
+4. **Check (`validate_agent`):**
+   - the frontmatter is exactly those fields;
+   - every preloaded skill exists;
+   - the instructions are under 300 lines;
+   - the body passes the skill safety scan, including the allowed hosts.
+5. **Review and approve** as usual (`review/cli.py review <name>`, then `approve <name>`). It's installed into `learned/agents/<name>/` and linked as `~/.claude/agents/<name>.md`. On Windows without developer mode, a marked copy is made instead.
+   - An agent file of your own with that name is never overwritten. `approve --replace-unmanaged` moves it to `store/replaced/`.
+6. **Kept current:** when the inventory changes, groups are made again. An installed agent whose members changed gets an update draft (`<name>-v2`). Uses are counted from `Agent` (formerly `Task`) calls with its `subagent_type`.
+
+To see the groups and their state, or to group again now:
+```bash
+python3 refine/refine.py agents
+```
+```bash
+python3 refine/refine.py agents --regroup
+```
+To turn it off, set `"agents": false` under `"auto"` in `store/config.json`.
+
 ## Muscle memory (`refine/memory.py`)
 
 The harness has two levels, like a person learning a task:

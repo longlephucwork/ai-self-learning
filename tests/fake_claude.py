@@ -30,7 +30,14 @@ if os.environ.get("FAKE_CLAUDE_FAIL"):
     print(json.dumps({"type": "result", "is_error": False, "total_cost_usd": 0.0}))  # no structured_output
     sys.exit(0)
 
-if "skill_worthy" in schema["properties"]:  # refine/worth.py: is the task worth a skill?
+if "agent_groups" in schema["properties"]:  # refine/agents.py: groups of related items (FAKE_AGENT_GROUPS)
+    out = {"agent_groups": json.loads(os.environ.get("FAKE_AGENT_GROUPS", "[]"))}
+elif "instructions" in schema["properties"]:  # refine/agents.py: the agent's description and instructions
+    out = {"agent_description": "Use proactively for deploying and releasing the user's services.",
+           "instructions": os.environ.get("FAKE_AGENT_BODY", "You are the user's devops expert.\n\n"
+                                          "- Deploy with local-service-deployment; release with release-round.\n"
+                                          "- Ask before anything that touches production.\n")}
+elif "skill_worthy" in schema["properties"]:  # refine/worth.py: is the task worth a skill?
     out = {"skill_worthy": True, "kind": "procedure", "confidence": 0.8, "reason": "fake: a recurring procedure"}
     for needle, (worthy, kind, reason) in json.loads(os.environ.get("FAKE_WORTH_RULES", "{}")).items():
         if needle.lower() in prompt.lower():

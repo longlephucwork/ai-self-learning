@@ -13,6 +13,7 @@ the code repo ignores, so learned items are never pushed), or $LEARNING_HARNESS_
   script -> scripts/<name>/  plus a usage-logging wrapper bin/<name>   run with: bin/<name> ...
   skill  -> skills/<name>/ + symlink ~/.claude/skills/<name> -> it   (git stays the source of truth)
   tool   -> mcp_tools/tools/<name>/  (tool.json + any code), served by mcp_tools/server.py as mcp__learned__<name>
+  agent  -> agents/<name>/<name>.md + symlink ~/.claude/agents/<name>.md -> it   (refine/agents.py)
 registry.json records what is installed, which version, from which pattern and evidence.
 """
 from __future__ import annotations
@@ -239,7 +240,41 @@ def target_dir(kind: str, name: str) -> Path:
         return install_root() / "skills" / name
     if kind == "tool":
         return install_root() / "mcp_tools" / "tools" / name
+    if kind == "agent":
+        return install_root() / "agents" / name
     raise InstallError(f"unknown artifact type {kind!r}")
+
+
+def agents_link_dir() -> Path:
+    return Path(os.environ.get("LEARNING_HARNESS_AGENTS_DIR", Path.home() / ".claude" / "agents"))
+
+
+def _agent_is_ours(link: Path, dest_file: Path) -> bool:
+    if link.is_symlink():
+        return link.resolve() == dest_file.resolve()
+    try:   # a copy (where symlinks aren't allowed) carries the harness's marker line
+        from refine.agents import MANAGED
+        return link.is_file() and MANAGED in link.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return False
+
+
+def unmanaged_agent_link(name: str) -> Path | None:
+    """~/.claude/agents/<name>.md when something the harness didn't put there occupies it."""
+    link = agents_link_dir() / f"{name}.md"
+    if not (link.exists() or link.is_symlink()):
+        return None
+    return None if _agent_is_ours(link, target_dir("agent", name) / f"{name}.md") else link
+
+
+def _link_agent(dest_file: Path, link: Path) -> None:
+    link.parent.mkdir(parents=True, exist_ok=True)
+    if link.is_symlink() or link.is_file():
+        link.unlink()   # ours (checked by the caller): refresh it
+    try:
+        link.symlink_to(dest_file.resolve())
+    except OSError:   # Windows without developer mode: a copy, which carries the MANAGED marker
+        shutil.copyfile(dest_file, link)
 
 
 def unmanaged_link(name: str) -> Path | None:
@@ -288,6 +323,13 @@ def install(proposal: dict, files: dict[str, str], *, draft_dir: Path, note: str
             raise InstallError(f"{link} already exists and the harness didn't install it (a copy made by hand?); "
                                f"not overwriting it. To back it up to store/replaced/ and install the tracked "
                                f"version: approve {name} --replace-unmanaged")
+    if kind == "agent":
+        link = agents_link_dir() / f"{name}.md"
+        to_replace = unmanaged_agent_link(name)
+        if to_replace and not replace_unmanaged:
+            raise InstallError(f"{link} already exists and the harness didn't make it (an agent of your own?); not "
+                               f"overwriting it. To back it up to store/replaced/ and install this one: approve "
+                               f"{name} --replace-unmanaged")
 
     # Write the new version into place (replace the folder wholesale; git keeps the old one).
     tmp = dest.with_name(f".{name}.installing")
@@ -305,7 +347,10 @@ def install(proposal: dict, files: dict[str, str], *, draft_dir: Path, note: str
     if link is not None:
         if to_replace:
             replaced = set_aside(to_replace)   # only now that the new version is in place
-        _link_skill(dest, link)
+        if kind == "agent":
+            _link_agent(dest / f"{name}.md", link)
+        else:
+            _link_skill(dest, link)
 
     pattern = store.load_pattern(proposal["pattern_key"]) or {}
     entry = {
@@ -330,6 +375,8 @@ def install(proposal: dict, files: dict[str, str], *, draft_dir: Path, note: str
         entry["promoted_from"] = proposal["promotes"]  # the skill this replaced (for `refine.py demote`)
     if proposal.get("quick"):
         entry["quick"] = True
+    if kind == "agent":
+        entry["members"] = proposal.get("members", [])
     if kind == "script":
         entry["shim"] = write_shim(entry).relative_to(install_root()).as_posix()
     reg["installed"][name] = entry
@@ -396,6 +443,8 @@ def uninstall(name: str, *, reason: str | None = None, use_git: bool = True, for
             link.unlink()
         elif link.is_dir() and (link / COPY_MARKER).exists():
             shutil.rmtree(link)
+        elif entry["type"] == "agent" and _agent_is_ours(link, dest / f"{name}.md"):
+            link.unlink()
     shutil.rmtree(dest, ignore_errors=True)
     shim = shim_path(name)
     for f in (shim, shim.with_name(shim.name + ".cmd")):

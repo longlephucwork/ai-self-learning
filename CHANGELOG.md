@@ -10,6 +10,7 @@ What changed in each version of the learning harness. The format follows
 - **The repository is now `ai-self-learning`** (it was `claude-learning-harness`). The install commands use the new name, and a new install goes into `~/ai-self-learning`. An install from before the rename keeps its folder, `~/claude-learning-harness`: re-running the installer uses it, and updates keep working because GitHub redirects the old address.
 
 ### Added
+- **Agents from related skills.** Related skills, scripts and tools (learned or made by hand) are grouped by domain into Claude Code subagents, for example a `devops` agent for deploying and releasing. The background run drafts each one (description, preloaded `skills:`, instructions) whenever the set changes, checks it, and Claude offers it at session start. It's installed as `~/.claude/agents/<name>.md` on your approval. A new related skill drafts an update, and delegations count as uses. `refine.py agents` shows the groups. Turn it off with `"agents": false`.
 - **Cleanup of tasks that aren't becoming skills.**
   - A task judged "not a skill" twice in a row is settled. It goes back to the model only if its repeats double or you correct it again.
   - A skill brief nobody built within 42 days (`brief_expire_days`) stops being offered. Its task is set aside with that reason, and it's offered again if its successful repeats double.
