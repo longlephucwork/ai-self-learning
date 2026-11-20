@@ -6,6 +6,9 @@ What changed in each version of the learning harness. The format follows
 
 ## [Unreleased]
 
+### Added
+- **Export installed items as a Claude Code plugin.** `contribute/export.py list` shows what's installed and exportable; `contribute/export.py export <names...> --dest DIR` builds (or updates) a standalone plugin folder: skills under `skills/`, agents under `agents/`, scripts become a bundled file plus a slash command under `commands/`, and generated tools become their own small standalone MCP server under `mcp_tools/` (listed in `.mcp.json`) with no dependency on this install. A tool that just wraps a script is exported as that script instead, and exporting an agent automatically pulls in the skills it preloads. Only items already approved and installed can be exported -- never a draft from `learned/generated/`. A skill's `evals/` (skill-creator's test fixtures, which hold redacted snippets of real sessions) is always stripped; nothing session-derived leaves the machine. `DIR` becomes its own git repo and each export is one commit, but nothing is ever pushed -- that stays a manual `git push` once you're happy with it, so `learned/` keeps its own never-pushed guarantee unchanged.
+
 ### Changed
 - **The repository is now `ai-self-learning`** (it was `claude-learning-harness`). The install commands use the new name, and a new install goes into `~/ai-self-learning`. An install from before the rename keeps its folder, `~/claude-learning-harness`: re-running the installer uses it, and updates keep working because GitHub redirects the old address.
 
