@@ -75,6 +75,15 @@ def _matchers(entry: dict):
     if entry["type"] == "tool":
         mcp_name = f"mcp__{rt.SERVER_NAME}__{entry['name']}"
         return lambda st: st["tool_name"] == mcp_name
+    if entry["type"] == "agent":   # a delegation: Agent (Task before Claude Code 2.1.63) with its subagent_type
+        def agent_match(st):
+            if st["tool_name"] not in ("Agent", "Task"):
+                return False
+            try:
+                return json.loads(st["input_json"]).get("subagent_type") == entry["name"]
+            except (ValueError, AttributeError):
+                return f'"subagent_type": "{entry["name"]}"' in st["input_json"]
+        return agent_match
     rx = re.compile(rf"(bin/{name}\b|scripts/{name}/)")
     return lambda st: st["tool_name"] == "Bash" and bool(rx.search(st["input_json"]))
 
@@ -302,6 +311,8 @@ def main(argv=None):
     p = sub.add_parser("auto"); p.add_argument("--force", action="store_true", help="ignore the throttle")
     sub.add_parser("auto-status")
     sub.add_parser("candidates", help="every repeated task: is it a skill candidate, and why or why not")
+    p = sub.add_parser("agents", help="subagents grouped from related skills, scripts and tools")
+    p.add_argument("--regroup", action="store_true", help="group again now and draft new or changed agents")
     p = sub.add_parser("assess", help="decide again whether a task is worth a skill"); p.add_argument("pattern")
     sub.add_parser("memory", help="every task's memory path: stage, strength, stability, fading")
     p = sub.add_parser("auto-config", help="show or change automatic learning's settings")
@@ -498,6 +509,33 @@ def main(argv=None):
         r = auto.run(force=a.force)
         if not r["ran"]:
             print(f"not run: {r['reason']}")
+        return 0
+    elif a.cmd == "agents":
+        from harness_lib.claude_cli import ClaudeError
+        from refine import agents
+        if a.regroup:
+            try:
+                made = agents.propose_agents(force=True, log=print)
+            except ClaudeError as e:
+                sys.exit(f"error: {e}")
+            if not made:
+                print("no new or changed agents")
+        inv = agents.inventory()
+        st = store.read_json(agents._state_path()) or {}
+        print(f"{len(inv)} skill(s), script(s) and tool(s) to group"
+              + (f"; last grouped {st['at'][:16]}" if st.get("at") else "; not grouped yet"))
+        installed = agents.installed_agents()
+        for g in st.get("groups", []):
+            e = installed.get(g["name"])
+            state = (f"installed v{e['version']}" if e and sorted(e.get("members", [])) == g["members"]
+                     else f"installed v{e['version']}, update drafted" if e else "drafted, waiting for your review")
+            print(f"  {g['name']} ({g['title']}): {', '.join(g['members'])}  [{state}]")
+        for n, e in installed.items():
+            if n not in {g["name"] for g in st.get("groups", [])}:
+                print(f"  {n}: {', '.join(e.get('members', []))}  [installed v{e['version']}; no longer a group]")
+        if not st.get("groups") and not installed:
+            print(f"  no groups yet: an agent needs {agents.AGENT_MIN_ITEMS}+ related items")
+        print("review a draft: python3 review/cli.py review <name>   approve: python3 review/cli.py approve <name>")
         return 0
     elif a.cmd == "candidates":
         from refine import auto, worth

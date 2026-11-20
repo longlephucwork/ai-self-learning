@@ -270,9 +270,13 @@ def cmd_approve(args):
     print(f"  learned from {ev['n_sessions']} sessions ({ev['n_success']} successful); "
           f"{sum(t['passed'] for t in rep['tests'])}/{len(rep['tests'])} sandbox tests passed; "
           f"files: {', '.join(sorted(files))}")
-    occupied = reg.unmanaged_link(proposal["name"]) if proposal["type"] == "skill" else None
+    occupied = reg.unmanaged_link(proposal["name"]) if proposal["type"] == "skill" else \
+        reg.unmanaged_agent_link(proposal["name"]) if proposal["type"] == "agent" else None
     if proposal["type"] == "skill":
         print(f"  and symlink {reg.skills_link_dir() / proposal['name']} -> it (Claude Code will load this skill)")
+    if proposal["type"] == "agent":
+        print(f"  and symlink {reg.agents_link_dir() / (proposal['name'] + '.md')} -> it (Claude Code can delegate "
+              f"to it); it preloads: {', '.join(proposal.get('members', []))}")
     if occupied:
         print(f"  {occupied} is already there, and the harness didn't install it (a copy made by hand?).")
         if args.replace_unmanaged:

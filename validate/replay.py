@@ -290,6 +290,8 @@ def validate_draft(proposal: dict, files: dict[str, str], pattern: dict, *, allo
         return validate_exposure(proposal, files, allow_no_netns=allow_no_netns)
     if proposal["type"] == "skill":
         return validate_skill(proposal, files, pattern, allow_no_netns=allow_no_netns, previous=previous)
+    if proposal["type"] == "agent":
+        return validate_agent(proposal, files)
     netns = netns_available()
     report = {"validated_at": store.now(), "network_isolated": netns, "tests": [], "provenance": [],
               "coverage": {}, "passed": False, "problems": []}
@@ -557,6 +559,58 @@ def fingerprint(files: dict[str, str], tests: list) -> str:
     import hashlib
     blob = json.dumps({"files": dict(sorted(files.items())), "tests": tests}, sort_keys=True, ensure_ascii=False)
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()[:16]
+
+
+AGENT_FIELDS = {"name", "description", "skills", "model"}   # anything else (tools, hooks, permissions) is refused
+
+
+def validate_agent(proposal: dict, files: dict[str, str]) -> dict:
+    """An agent drafted by refine/agents.py: the frontmatter is exactly what the harness writes, every skill it
+    preloads exists, the instructions are a sane length, and they pass the skill safety scan."""
+    import hashlib
+
+    from harness_lib.scan import blocking, scan_artifact
+    from refine.agents import inventory
+    name = proposal["name"]
+    rep = {"validated_at": store.now(), "network_isolated": False, "tests": [], "provenance": [], "judged": [],
+           "coverage": {"method": "agent", "covered": 0, "successful_sessions": 0, "required": 0},
+           "passed": False, "problems": [],
+           "fingerprint": hashlib.sha256(json.dumps(files, sort_keys=True).encode()).hexdigest()[:16]}
+    P = rep["problems"]
+    text = files.get(f"{name}.md")
+    if text is None or set(files) != {f"{name}.md"}:
+        P.append(f"an agent is exactly one file, {name}.md")
+        return rep
+    fm, err = _frontmatter(text)
+    if not isinstance(fm, dict):
+        P.append(err or "unreadable frontmatter")
+        return rep
+    if fm.get("name") != name or not re.fullmatch(r"[a-z0-9]+(-[a-z0-9]+)*", name):
+        P.append(f"frontmatter name must be {name!r} (kebab-case)")
+    desc = str(fm.get("description") or "")
+    if not desc or len(desc) > 1024 or "<" in desc or ">" in desc:
+        P.append("description must be 1-1024 characters, without angle brackets")
+    extra = set(fm) - AGENT_FIELDS
+    if extra:
+        P.append(f"frontmatter may only set {', '.join(sorted(AGENT_FIELDS))}; found {', '.join(sorted(extra))}")
+    if str(fm.get("model", "inherit")) != "inherit":
+        P.append("model must be inherit")
+    skills = fm.get("skills") or []
+    if isinstance(skills, str):   # the fallback parser reads [a, b] as text
+        skills = [x.strip() for x in skills.strip("[]").split(",") if x.strip()]
+    have = {i["name"] for i in inventory() if i["kind"] == "skill"}
+    missing = [x for x in skills if x not in have]
+    if missing:
+        P.append(f"preloads skills that don't exist: {', '.join(missing)}")
+    body = text.split("---", 2)[2] if text.count("---") >= 2 else ""
+    if not body.strip():
+        P.append("no instructions after the frontmatter")
+    elif len(body.splitlines()) > 300:
+        P.append(f"instructions are {len(body.splitlines())} lines; keep them under 300")
+    for f in blocking(scan_artifact("skill", {f"{name}.md": body})):
+        P.append(f"safety scan: {f['kind']} in {f['file']}:{f['line']} ({f['detail']})")
+    rep["passed"] = not P
+    return rep
 
 
 def load_draft(name: str) -> tuple[dict, dict[str, str], Path]:
