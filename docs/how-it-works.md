@@ -373,6 +373,39 @@ A long session often does several jobs in a row: update a repo, merge a PR, then
 
 To make the background run do this for every task, set `"min_success": 1` under `"auto"` in `store/config.json` (default 3). It drafts much more, so it costs more.
 
+## Exporting as a Claude Code plugin (`contribute/export.py`)
+
+`learned/` stays a local git repo that is never pushed with the code (see *Where things live*). This is
+the one way anything learned leaves the machine, and it is manual every time:
+
+```bash
+python3 contribute/export.py list                                   # what's installed and exportable
+python3 contribute/export.py export devops csv-to-json --dest ~/my-claude-plugin --name my-tools
+```
+
+It reads only what `review/cli.py approve` already installed -- never a draft waiting in
+`learned/generated/` -- and copies a clean copy into a separate plugin folder you choose:
+
+| Installed as | Becomes, in the plugin |
+|---|---|
+| skill | `skills/<name>/`, without its `evals/` (skill-creator's test fixtures, which hold redacted snippets of real sessions: this never leaves the machine, for any destination) |
+| agent | `agents/<name>.md`; the skills it lists under `skills:` are pulled in automatically |
+| script | `scripts/<name>/`, plus a slash command in `commands/<name>.md` that runs it with `${CLAUDE_PLUGIN_ROOT}` |
+| tool that wraps a script (`"wraps"` in its `tool.json`) | exported as that script instead (it's just an argv wrapper) |
+| tool (generated) | its own small standalone MCP server under `mcp_tools/<name>/server.py`, listed in `.mcp.json`. Self-contained (no dependency on this install) but **not sandboxed** -- review the bundled code before trusting it elsewhere |
+
+The destination gets (or already has) a `.claude-plugin/plugin.json` manifest, a `README.md` listing
+its current contents, and becomes its own git repo if it isn't one; each export is one commit (the
+patch version bumps automatically unless `--version` is given), so you can see and revert what
+changed. **Nothing is ever pushed.** Push it yourself once you're happy with it:
+
+```bash
+cd ~/my-claude-plugin && git remote add origin <url> && git push -u origin main
+```
+
+From there it's an ordinary Claude Code plugin folder: add it locally, or point a marketplace entry
+at the pushed repo, following Claude Code's own plugin documentation.
+
 ## Memory paths: short-term and long-term (`refine/synapse.py`)
 
 Repeated work builds a path, like a synapse. It strengthens with practice and fades without it. `refine.py memory` shows every task's path.

@@ -85,6 +85,8 @@ You can also do it all by hand. Run these from `~/ai-self-learning` (on Windows,
 | `python3 refine/refine.py auto-config` | show or change the budget, how often it runs, and how many sessions it waits for (below) |
 | `python3 registry/install.py list` | what's installed |
 | `python3 registry/install.py uninstall <name>` | remove an installed item |
+| `python3 contribute/export.py list` | what's installed and can be exported |
+| `python3 contribute/export.py export <names...> --dest DIR` | copy installed skills/agents/scripts/tools into a standalone Claude Code plugin at `DIR`, for you to push to a repo of your own |
 
 ## Updates
 
@@ -124,6 +126,6 @@ Run it with no options to see the current values. `--reset every` (or `--reset a
 - Stop the update check: set `"check": false` under `"update"` in `store/config.json`.
 - Status: `python3 install.py --check`.
 
-Your sessions stay on your machine, in `store/`, which only you can read. What the harness learns goes in `learned/`, its own local git repo: each learned item is a commit you can revert, and none of it is ever pushed with the code.
+Your sessions stay on your machine, in `store/`, which only you can read. What the harness learns goes in `learned/`, its own local git repo: each learned item is a commit you can revert, and none of it is ever pushed with the code. If you want to share or reuse what you've learned elsewhere, `contribute/export.py` copies chosen, already-installed skills/agents/scripts/tools (never a draft, and never a skill's session-derived `evals/`) into a separate Claude Code plugin folder that *you* push, when and where you choose.
 
 How it works in detail: [docs/how-it-works.md](docs/how-it-works.md).
