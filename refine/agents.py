@@ -90,15 +90,17 @@ def _fm(text: str) -> dict:
 def inventory() -> list[dict]:
     """[{name, kind, description, source}] of everything an agent could use."""
     from registry import install as reg
+    installed = reg.load_registry()["installed"]
     items: dict[str, dict] = {}
-    for e in reg.load_registry()["installed"].values():
+    for e in installed.values():
         if e["type"] in ("skill", "script", "tool"):
             items[e["name"]] = {"name": e["name"], "kind": e["type"], "description": e.get("description", ""),
                                 "source": "learned"}
-    root = reg.skills_link_dir()
+    workflow_names = {n for n, e in installed.items() if e["type"] == "workflow"}  # linked into skills_link_dir too,
+    root = reg.skills_link_dir()                                                 # but not a skill to group
     for d in sorted(root.iterdir()) if root.is_dir() else []:
         md = d / "SKILL.md"
-        if d.name in items or d.name in OWN_SKILLS or not md.is_file():
+        if d.name in items or d.name in OWN_SKILLS or d.name in workflow_names or not md.is_file():
             continue
         fm = _fm(md.read_text(encoding="utf-8", errors="replace"))
         items[d.name] = {"name": d.name, "kind": "skill", "description": str(fm.get("description", ""))[:600],
@@ -196,9 +198,11 @@ def draft(g: dict, items: dict, *, model: str | None = None, log=lambda *_: None
     (d / "files").mkdir(parents=True, exist_ok=True)
     fname = f"{g['name']}.md"
     (d / "files" / fname).write_text(text, encoding="utf-8")
+    from harness_lib.scan import scan_artifact
     proposal = {"name": g["name"], "type": "agent", "pattern_key": key, "status": "draft", "created_by": "harness",
                 "description": " ".join(out["agent_description"].split())[:900], "spec": g["domain"],
                 "entrypoint": fname, "type_deviation_reason": "", "file_list": [fname], "tests": [],
+                "scan_flags": scan_artifact("skill", {fname: text}),
                 "members": g["members"], "title": g["title"], "cost_usd": round(cost, 4),
                 "evidence": {"sessions": [], "n_success": 0, "n_sessions": 0}, "created_at": store.now()}
     if prev:

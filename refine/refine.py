@@ -313,6 +313,8 @@ def main(argv=None):
     sub.add_parser("candidates", help="every repeated task: is it a skill candidate, and why or why not")
     p = sub.add_parser("agents", help="subagents grouped from related skills, scripts and tools")
     p.add_argument("--regroup", action="store_true", help="group again now and draft new or changed agents")
+    p = sub.add_parser("workflows", help="ordered, gated chains mined from how installed items are actually used")
+    p.add_argument("--remine", action="store_true", help="mine again now and draft new or changed workflows")
     p = sub.add_parser("assess", help="decide again whether a task is worth a skill"); p.add_argument("pattern")
     sub.add_parser("memory", help="every task's memory path: stage, strength, stability, fading")
     p = sub.add_parser("auto-config", help="show or change automatic learning's settings")
@@ -535,6 +537,33 @@ def main(argv=None):
                 print(f"  {n}: {', '.join(e.get('members', []))}  [installed v{e['version']}; no longer a group]")
         if not st.get("groups") and not installed:
             print(f"  no groups yet: an agent needs {agents.AGENT_MIN_ITEMS}+ related items")
+        print("review a draft: python3 review/cli.py review <name>   approve: python3 review/cli.py approve <name>")
+        return 0
+    elif a.cmd == "workflows":
+        from harness_lib.claude_cli import ClaudeError
+        from refine import workflow as wf
+        if a.remine:
+            try:
+                made = wf.propose_workflows(force=True, log=print)
+            except ClaudeError as e:
+                sys.exit(f"error: {e}")
+            if not made:
+                print("no new or changed workflows")
+        chains = wf.mine_chains()
+        st = store.read_json(wf._state_path()) or {}
+        print(f"{len(chains)} chain(s) mined" + (f"; last mined {st['at'][:16]}" if st.get("at") else "; not mined yet"))
+        installed = wf.installed_workflows()
+        for chain in chains:
+            e = next((e for e in installed.values() if e.get("steps") == chain), None)
+            name = e["name"] if e else None
+            state = f"installed v{e['version']}" if e else "drafted, waiting for your review"
+            print(f"  {' -> '.join(chain)}" + (f"  [{name}: {state}]" if e else "  [not installed yet]"))
+        for n, e in installed.items():
+            if e.get("steps") not in chains:
+                print(f"  {n}: {' -> '.join(e.get('steps', []))}  [installed v{e['version']}; no longer mined]")
+        if not chains:
+            print(f"  nothing mined yet: a workflow needs {wf.WORKFLOW_MIN_REPEATS}+ sessions that used the same "
+                  f"{wf.WORKFLOW_MIN_STEPS}+ installed items, directly one after another, in the same order")
         print("review a draft: python3 review/cli.py review <name>   approve: python3 review/cli.py approve <name>")
         return 0
     elif a.cmd == "candidates":

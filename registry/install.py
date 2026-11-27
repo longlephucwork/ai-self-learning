@@ -71,11 +71,12 @@ def _link_skill(dest: Path, link: Path) -> None:
 
 
 def relink_skills() -> list[str]:
-    """Repair: link every installed skill that Claude Code can't currently see. Returns the names fixed."""
+    """Repair: link every installed skill or workflow that Claude Code can't currently see (both link into
+    ~/.claude/skills/). Returns the names fixed."""
     fixed = []
     reg = load_registry()
     for e in reg["installed"].values():
-        if e["type"] != "skill":
+        if e["type"] not in ("skill", "workflow"):
             continue
         dest = install_root() / e["path"]
         link = skills_link_dir() / e["name"]
@@ -238,6 +239,8 @@ def target_dir(kind: str, name: str) -> Path:
         return install_root() / "scripts" / name
     if kind == "skill":
         return install_root() / "skills" / name
+    if kind == "workflow":
+        return install_root() / "workflows" / name
     if kind == "tool":
         return install_root() / "mcp_tools" / "tools" / name
     if kind == "agent":
@@ -277,13 +280,14 @@ def _link_agent(dest_file: Path, link: Path) -> None:
         shutil.copyfile(dest_file, link)
 
 
-def unmanaged_link(name: str) -> Path | None:
+def unmanaged_link(name: str, kind: str = "skill") -> Path | None:
     """~/.claude/skills/<name> when something the harness didn't put there occupies it (a folder copied or made
-    by hand, or a link pointing elsewhere); None when it's free or ours."""
+    by hand, or a link pointing elsewhere); None when it's free or ours. `kind` is "skill" or "workflow" --
+    both link into the same skills directory, since Claude Code loads and triggers a workflow like any skill."""
     link = skills_link_dir() / name
     if not (link.exists() or link.is_symlink()):
         return None
-    dest = target_dir("skill", name)
+    dest = target_dir(kind, name)
     ours = (link.is_symlink() and link.resolve() == dest.resolve()) or (link / COPY_MARKER).exists()
     return None if ours else link
 
@@ -316,9 +320,9 @@ def install(proposal: dict, files: dict[str, str], *, draft_dir: Path, note: str
         if not wrapped or wrapped["type"] != "script":
             raise InstallError(f"tool wraps {proposal['wraps']['script']!r}, which is not an installed script")
     link = replaced = to_replace = None
-    if kind == "skill":
+    if kind in ("skill", "workflow"):
         link = skills_link_dir() / name
-        to_replace = unmanaged_link(name)
+        to_replace = unmanaged_link(name, kind=kind)
         if to_replace and not replace_unmanaged:
             raise InstallError(f"{link} already exists and the harness didn't install it (a copy made by hand?); "
                                f"not overwriting it. To back it up to store/replaced/ and install the tracked "
@@ -377,6 +381,8 @@ def install(proposal: dict, files: dict[str, str], *, draft_dir: Path, note: str
         entry["quick"] = True
     if kind == "agent":
         entry["members"] = proposal.get("members", [])
+    if kind == "workflow":
+        entry["steps"] = proposal.get("steps", [])
     if kind == "script":
         entry["shim"] = write_shim(entry).relative_to(install_root()).as_posix()
     reg["installed"][name] = entry

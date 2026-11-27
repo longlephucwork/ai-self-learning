@@ -73,6 +73,14 @@ class Contribute(unittest.TestCase):
                                              "entrypoint": None if wraps else entrypoint, "description": desc,
                                              "version": 1}
 
+    def add_workflow(self, name, desc, steps):
+        d = self.root / "workflows" / name
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "SKILL.md").write_text(f"---\nname: {name}\ndescription: {desc}\n---\n\n"
+                                     + "\n".join(f"{i}. **{s}**." for i, s in enumerate(steps, 1)) + "\n")
+        self.registry["installed"][name] = {"name": name, "type": "workflow", "path": f"workflows/{name}",
+                                             "description": desc, "version": 1, "steps": steps}
+
     def test_list_shows_nothing_when_empty(self):
         self.save_registry()
         from contribute import export
@@ -126,6 +134,26 @@ class Contribute(unittest.TestCase):
         self.assertIn("skill beta", result["added"])
         self.assertTrue((dest / "agents" / "devops.md").is_file())
         self.assertTrue(any("needs skill" in n for n in result["notes"]))
+
+    def test_export_workflow_pulls_in_every_step_and_lands_in_skills(self):
+        self.add_skill("implement-feature", "Implement a feature")
+        self.add_script("run-tests", "Run the test suite")
+        self.add_tool("cut-release", "Cut a release")
+        self.add_workflow("release-pipeline", "Use when shipping a change end to end.",
+                          ["implement-feature", "run-tests", "cut-release"])
+        self.save_registry()
+        from contribute import export
+        dest = self.t / "plugin"
+        result = export.export(["release-pipeline"], dest, name="plug")
+        self.assertIn("workflow release-pipeline", result["added"])
+        self.assertIn("skill implement-feature", result["added"])
+        self.assertIn("script run-tests", result["added"])
+        self.assertIn("tool cut-release", result["added"])
+        self.assertTrue(any("also needs step" in n for n in result["notes"]))
+        self.assertTrue((dest / "skills" / "release-pipeline" / "SKILL.md").is_file())
+        self.assertTrue((dest / "skills" / "implement-feature" / "SKILL.md").is_file())
+        self.assertTrue((dest / "scripts" / "run-tests").is_dir())
+        self.assertTrue((dest / "mcp_tools" / "cut-release" / "server.py").is_file())
 
     def test_export_script_becomes_a_slash_command(self):
         self.add_script("csv-to-json", "Convert csv to json", "convert.py")

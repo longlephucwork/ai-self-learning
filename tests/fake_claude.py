@@ -37,6 +37,10 @@ elif "instructions" in schema["properties"]:  # refine/agents.py: the agent's de
            "instructions": os.environ.get("FAKE_AGENT_BODY", "You are the user's devops expert.\n\n"
                                           "- Deploy with local-service-deployment; release with release-round.\n"
                                           "- Ask before anything that touches production.\n")}
+elif "step_notes" in schema["properties"]:  # refine/workflow.py: the workflow's name, description and step notes
+    out = json.loads(os.environ.get("FAKE_WORKFLOW_DRAFT", json.dumps({
+        "name": "release-pipeline", "workflow_description": "Use when shipping a finished change end to end.",
+        "step_notes": ["" for _ in json.loads(re.search(r"STEPS IN ORDER: (\[.*?\])", prompt).group(1))]})))
 elif "skill_worthy" in schema["properties"]:  # refine/worth.py: is the task worth a skill?
     out = {"skill_worthy": True, "kind": "procedure", "confidence": 0.8, "reason": "fake: a recurring procedure"}
     for needle, (worthy, kind, reason) in json.loads(os.environ.get("FAKE_WORTH_RULES", "{}")).items():
