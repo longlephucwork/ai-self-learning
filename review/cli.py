@@ -128,7 +128,7 @@ def cmd_proposals(args):
     for m, v in rows:
         t = v.get("tests", [])
         print(f"{m['status']:18} {m['type']:7} {m['evidence']['n_sessions']:>4} {m['evidence']['n_success']:>3} "
-              f"{sum(x['passed'] for x in t):>3}/{len(t):<2} {len(blocking(m['scan_flags'])):>5}  {m['name']}")
+              f"{sum(x['passed'] for x in t):>3}/{len(t):<2} {len(blocking(m.get('scan_flags', []))):>5}  {m['name']}")
 
 
 def cmd_review(args):
