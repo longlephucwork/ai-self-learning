@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""Export installed skills/agents/scripts/tools as a standalone Claude Code plugin.
+"""Export installed skills/agents/scripts/tools/workflows as a standalone Claude Code plugin.
 
 Nothing here touches `learned/` (its own local git repo, never pushed) or this code repo. It only
 reads what `review/cli.py approve` already installed -- skills in learned/skills/, agents in
-learned/agents/, scripts in learned/scripts/, tools in learned/mcp_tools/tools/ -- and copies a
-clean, shareable copy into a separate plugin folder you choose. Nothing in learned/generated/
-(unapproved drafts) can be exported: only items a human already approved.
+learned/agents/, scripts in learned/scripts/, tools in learned/mcp_tools/tools/, workflows in
+learned/workflows/ -- and copies a clean, shareable copy into a separate plugin folder you choose.
+Nothing in learned/generated/ (unapproved drafts) can be exported: only items a human already
+approved.
 
   python3 contribute/export.py list                                  # what can be exported
   python3 contribute/export.py export <names...> --dest DIR          # build/update the plugin at DIR
@@ -13,7 +14,9 @@ clean, shareable copy into a separate plugin folder you choose. Nothing in learn
 
 Skills are copied without their evals/ (skill-creator's test fixtures, which hold redacted
 snippets of your real sessions) -- that folder never leaves this machine, for any destination.
-Agents pull in the skills they list under `skills:` automatically. Scripts become a bundled file
+Agents pull in the skills they list under `skills:` automatically. Workflows pull in every step
+they chain (whatever kind each one is) and export into the plugin's skills/, same as a plain
+skill -- Claude Code loads and triggers a workflow exactly like one. Scripts become a bundled file
 plus a slash command that runs it. A tool that just wraps a script (`"wraps"` in its tool.json)
 exports as that script instead; a real generated tool becomes its own small standalone MCP server
 bundled with the plugin (no sandboxing there -- review its code before trusting it elsewhere).
@@ -50,9 +53,10 @@ class ExportError(RuntimeError):
 # ---------------- inventory ----------------
 
 def exportable() -> dict[str, dict]:
-    """name -> registry entry, for every installed skill/agent/script/tool (never unapproved drafts)."""
+    """name -> registry entry, for every installed skill/agent/script/tool/workflow (never an unapproved
+    draft)."""
     installed = reg.load_registry()["installed"]
-    return {n: e for n, e in installed.items() if e["type"] in ("skill", "agent", "script", "tool")}
+    return {n: e for n, e in installed.items() if e["type"] in ("skill", "agent", "script", "tool", "workflow")}
 
 
 def cmd_list(args) -> None:
@@ -60,7 +64,7 @@ def cmd_list(args) -> None:
     if not items:
         print("nothing installed yet -- approve a draft first (review/cli.py approve)")
         return
-    for kind in ("skill", "agent", "script", "tool"):
+    for kind in ("skill", "agent", "script", "tool", "workflow"):
         names = sorted(n for n, e in items.items() if e["type"] == kind)
         if not names:
             continue
@@ -87,8 +91,8 @@ def resolve(names: list[str]) -> tuple[dict[str, set], list[str]]:
     items = exportable()
     unknown = [n for n in names if n not in items]
     if unknown:
-        raise ExportError(f"not installed (or not a skill/agent/script/tool): {', '.join(unknown)}")
-    picked: dict[str, set] = {"skill": set(), "agent": set(), "script": set(), "tool": set()}
+        raise ExportError(f"not installed (or not a skill/agent/script/tool/workflow): {', '.join(unknown)}")
+    picked: dict[str, set] = {"skill": set(), "agent": set(), "script": set(), "tool": set(), "workflow": set()}
     notes: list[str] = []
     queue, seen = list(names), set()
     while queue:
@@ -115,6 +119,11 @@ def resolve(names: list[str]) -> tuple[dict[str, set], list[str]]:
                 if s in items and items[s]["type"] == "skill" and s not in seen:
                     notes.append(f"agent {n!r} also needs skill {s!r}; added it")
                     queue.append(s)
+        elif kind == "workflow":
+            for s in e.get("steps") or []:
+                if s in items and s not in seen:
+                    notes.append(f"workflow {n!r} also needs step {s!r} ({items[s]['type']}); added it")
+                    queue.append(s)
     return picked, notes
 
 
@@ -138,6 +147,12 @@ def export_agent(name: str, e: dict, dest: Path) -> None:
     out = dest / "agents" / f"{name}.md"
     out.parent.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(reg.install_root() / e["path"] / f"{name}.md", out)
+
+
+def export_workflow(name: str, e: dict, dest: Path) -> None:
+    """A workflow is a SKILL.md -- Claude Code loads and triggers it exactly like any skill -- so it's
+    exported into the plugin's skills/, not a separate folder."""
+    _copy_dir_filtered(reg.install_root() / e["path"], dest / "skills" / name, SKILL_EXCLUDE)
 
 
 COMMAND_TEMPLATE = Template('''---
@@ -372,6 +387,9 @@ def export(names: list[str], dest: Path, *, name: str | None = None, description
     for n in sorted(picked["agent"]):
         export_agent(n, items[n], dest)
         added.append(f"agent {n}")
+    for n in sorted(picked["workflow"]):
+        export_workflow(n, items[n], dest)
+        added.append(f"workflow {n}")
     for n in sorted(picked["script"]):
         export_script(n, items[n], dest)
         added.append(f"script {n}")

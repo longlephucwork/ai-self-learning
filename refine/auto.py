@@ -23,6 +23,7 @@ Settings, in store/config.json under "auto" (defaults shown). Change them with `
   split_tasks: true (split finished sessions that did several separate jobs into one part per job; refine/segment.py)
   brief_expire_days: 42 (a skill brief nobody started building in this long stops being offered)
   agents: true      (group related skills, scripts and tools into Claude Code subagents; refine/agents.py)
+  workflows: true   (chain recurring, already-installed tasks into an ordered, gated workflow; refine/workflow.py)
 Every model call's cost goes to store/spend.jsonl. Background runs stop when the month's spend reaches
 the budget, and each call's own limit is capped at what remains.
 """
@@ -47,7 +48,7 @@ DEFAULTS = {"enabled": False, "monthly_budget_usd": 5.0, "min_hours_between_runs
             "max_drafts_per_run": 1, "retry_days": 7, "min_confidence": 0.6, "min_success": 3,
             "promote_min_uses": 5, "promote_min_accuracy": 0.9, "promote_min_mechanical": 0.75,
             "promote_as": "tool", "memory_days": 30, "split_tasks": True, "brief_expire_days": 42,
-            "agents": True}
+            "agents": True, "workflows": True}
 LOCK_STALE_S = 2 * 3600
 RETRY_AFTER_FAILURE = timedelta(hours=1)
 CHECK_EVERY = timedelta(minutes=10)   # the Stop hook (after every reply) checks at most this often
@@ -781,6 +782,15 @@ def run(*, force: bool = False) -> dict:
                 if e.fatal:
                     raise
                 log(f"  agents: {str(e)[:150]}")
+        # 6. workflows: ordered, gated chains mined from how installed skills/scripts/tools are actually used
+        if cfg.get("workflows", True):
+            from refine import workflow as wf
+            try:
+                result["workflows"] = wf.propose_workflows(min_repeats=cfg["min_success"], log=lambda m: log(m))
+            except ClaudeError as e:
+                if e.fatal:
+                    raise
+                log(f"  workflows: {str(e)[:150]}")
         nm = near_misses(cfg["min_success"])
         result["near_misses"] = [n["pattern"] for n in nm]
         log(f"  summary: {len(result.get('candidates', []))} candidate(s), {len(briefs)} skill brief(s), "
@@ -852,7 +862,7 @@ def inbox() -> list[dict]:
                     "tests": f"{sum(t['passed'] for t in v.get('tests', []))}/{len(v.get('tests', []))}",
                     "judged": f"{sum(j['verdict'] == 'pass' for j in v.get('judged', []))}/{len(v.get('judged', []))}",
                     "fingerprint": v.get("fingerprint"), "description": m.get("description", ""),
-                    "members": m.get("members", [])})
+                    "members": m.get("members", []), "steps": m.get("steps", [])})
     return out
 
 
@@ -1021,6 +1031,10 @@ def session_start_context() -> str | None:
         if i["type"] == "agent":   # grouped from existing skills, not learned from sessions
             lines.append(f"- agent '{i['name']}', an expert Claude can delegate to, grouping "
                          f"{', '.join(i['members'])}: {i['description'][:160]}")
+            continue
+        if i["type"] == "workflow":   # mined from how installed items are actually used, not a new skill
+            lines.append(f"- workflow '{i['name']}', a fixed step-by-step chain ({' -> '.join(i['steps'])}): "
+                         f"{i['description'][:160]}")
             continue
         lines.append(f"- {i['type']} '{i['name']}': {i['description'][:160]} (seen {i['n_sessions']} times, "
                      f"{i['n_success']} successful; {checks}{extra})")

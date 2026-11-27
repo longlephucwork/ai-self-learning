@@ -457,6 +457,47 @@ python3 refine/refine.py agents --regroup
 ```
 To turn it off, set `"agents": false` under `"auto"` in `store/config.json`.
 
+## Workflows: ordered, gated chains (`refine/workflow.py`)
+
+An agent's instructions can *describe* an order ("deploy, then release"); they can't enforce one. A
+**workflow** is a fixed, ordered chain of already-installed skills/scripts/tools -- e.g. implement -> test
+-> merge -> release -> deploy, though the mining is domain-agnostic and finds whatever chain actually
+recurs in your own work. It adds what an agent's free text can't guarantee: a strict order, and a real
+gate between steps.
+
+1. **Mine (no model call).** From every installed skill/script/tool's real uses (the same evidence
+   `refine/refine.py`'s `collect_uses` already tracks for Phase 5), build each session's ordered,
+   deduplicated sequence of artifacts used, then count how often one is directly followed by another
+   across sessions. An edge seen at least `min_success` times is trusted. Edges chain into a path only
+   where both ends are unambiguous -- exactly one qualifying edge in, one out -- so a real branch or merge
+   point simply ends the chain there instead of guessing which way it goes. v1 is linear only: no
+   branching, conditionals or nested workflows.
+2. **Draft.** One model call names the chain and writes a one-line note per step, in the user's own
+   words. The harness writes the frontmatter, the step order and every gate sentence itself, so the model
+   can't skip or soften one: a hard **stop-on-failure** after a script or tool step (it has a real exit
+   code), a softer **ask before continuing** after a skill step (whose result is Claude's judgment, not an
+   exit code).
+3. **Check (`validate_workflow`):** every step is an installed skill, script or tool; at least 2, all
+   distinct; each is named, in the declared order, in the instructions; each is followed by its gate
+   sentence before the next step; the normal skill safety scan.
+4. **Install.** Like a skill: linked into `~/.claude/skills/<name>` as `learned/workflows/<name>/SKILL.md`.
+   Claude Code has no separate "workflow" concept, so a workflow is loaded and triggered exactly like any
+   skill -- but the harness writes it directly, the same way it writes an agent, because it invents no new
+   judgment of its own: it only sequences and gates pieces a human already approved. Unlike an agent, it
+   does **not** preload its steps' content (`skills:` is an agent-only field): it calls each step by name
+   in its own instructions, the same way any skill can mention another.
+5. **Kept current:** when the mined chains change, an installed workflow whose steps changed gets an
+   update draft (`<name>-v2`).
+
+To see the mined chains and their state, or to mine again now:
+```bash
+python3 refine/refine.py workflows
+```
+```bash
+python3 refine/refine.py workflows --remine
+```
+To turn it off, set `"workflows": false` under `"auto"` in `store/config.json`.
+
 ## Muscle memory (`refine/memory.py`)
 
 The harness has two levels, like a person learning a task:

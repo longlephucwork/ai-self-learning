@@ -292,6 +292,8 @@ def validate_draft(proposal: dict, files: dict[str, str], pattern: dict, *, allo
         return validate_skill(proposal, files, pattern, allow_no_netns=allow_no_netns, previous=previous)
     if proposal["type"] == "agent":
         return validate_agent(proposal, files)
+    if proposal["type"] == "workflow":
+        return validate_workflow(proposal, files)
     netns = netns_available()
     report = {"validated_at": store.now(), "network_isolated": netns, "tests": [], "provenance": [],
               "coverage": {}, "passed": False, "problems": []}
@@ -608,6 +610,58 @@ def validate_agent(proposal: dict, files: dict[str, str]) -> dict:
     elif len(body.splitlines()) > 300:
         P.append(f"instructions are {len(body.splitlines())} lines; keep them under 300")
     for f in blocking(scan_artifact("skill", {f"{name}.md": body})):
+        P.append(f"safety scan: {f['kind']} in {f['file']}:{f['line']} ({f['detail']})")
+    rep["passed"] = not P
+    return rep
+
+
+def validate_workflow(proposal: dict, files: dict[str, str]) -> dict:
+    """A workflow drafted by refine/workflow.py: a SKILL.md that chains already-installed skills/scripts/
+    tools in a fixed order, with a gate after every step. It's linked into ~/.claude/skills/ like any skill,
+    so the Claude skill standard applies -- but it carries no skills:/model: field (only an agent preloads
+    skills; a workflow calls each step by name, like any skill mentioning another)."""
+    from harness_lib.scan import blocking, scan_artifact
+    from refine.agents import inventory
+    from refine.workflow import HARD_GATE, SOFT_GATE
+    name = proposal["name"]
+    rep = {"validated_at": store.now(), "network_isolated": False, "tests": [], "provenance": [], "judged": [],
+           "coverage": {"method": "workflow", "covered": 0, "successful_sessions": 0, "required": 0},
+           "passed": False, "problems": [], "fingerprint": fingerprint(files, proposal.get("tests", []))}
+    P = rep["problems"]
+    if set(files) != {"SKILL.md"}:
+        P.append("a workflow is exactly one file, SKILL.md")
+        return rep
+    P += skill_standard_problems(files, expected_name=name)
+    steps = proposal.get("steps") or []
+    if len(steps) < 2:
+        P.append("a workflow needs at least 2 steps")
+    if len(set(steps)) != len(steps):
+        P.append("a step name is repeated; each step must be distinct")
+    have = {i["name"]: i["kind"] for i in inventory()}
+    missing = [s for s in steps if s not in have]
+    if missing:
+        P.append(f"step(s) that aren't an installed skill/script/tool: {', '.join(missing)}")
+    text = files["SKILL.md"]
+    body = text.split("---", 2)[2] if text.count("---") >= 2 else ""
+    if not missing:
+        positions, cursor, in_order = [], 0, True
+        for s in steps:
+            i = body.find(s, cursor)
+            if i < 0:
+                in_order = False
+                break
+            positions.append(i)
+            cursor = i + len(s)
+        if not in_order:
+            P.append("every step must be named, in the declared order, in the instructions")
+        else:
+            bounds = positions[1:] + [len(body)]
+            for s, start, end in zip(steps, positions, bounds):
+                gate = HARD_GATE if have.get(s) in ("script", "tool") else SOFT_GATE
+                if gate not in body[start:end]:
+                    kind_word = "script/tool" if have.get(s) in ("script", "tool") else "skill"
+                    P.append(f"step {s!r} ({kind_word}) is missing its gate instruction before the next step")
+    for f in blocking(scan_artifact("skill", files)):
         P.append(f"safety scan: {f['kind']} in {f['file']}:{f['line']} ({f['detail']})")
     rep["passed"] = not P
     return rep
